@@ -428,14 +428,35 @@
     const offscreenCanvas = document.createElement('canvas');
     const offCtx = offscreenCanvas.getContext('2d');
 
+    // Smooth render loop: draw the live video + latest detection overlay every
+    // animation frame, independent of how slowly the server answers. Setting
+    // canvas width/height clears it, so only resize when the size really changes.
+    const renderLoop = () => {
+      if (!state.cameraRunning) return;
+      const v = elements.liveVideo;
+      if (v.videoWidth) {
+        const c = elements.liveCanvas;
+        if (c.width !== v.videoWidth || c.height !== v.videoHeight) {
+          c.width = v.videoWidth;
+          c.height = v.videoHeight;
+        }
+        const rctx = c.getContext('2d');
+        rctx.drawImage(v, 0, 0, c.width, c.height);
+        const last = state.liveLatestTelemetry;
+        if (last) renderDrsOverlays(rctx, last.detection || last, c.width, c.height);
+      }
+      requestAnimationFrame(renderLoop);
+    };
+    requestAnimationFrame(renderLoop);
+
+    let inFlight = false; // only one inference request at a time (CPU server)
+
     state.liveInterval = setInterval(() => {
-      if (!state.cameraRunning || !elements.liveVideo.videoWidth) return;
+      if (!state.cameraRunning || !elements.liveVideo.videoWidth || inFlight) return;
 
       const vw = elements.liveVideo.videoWidth;
       const vh = elements.liveVideo.videoHeight;
 
-      elements.liveCanvas.width = vw;
-      elements.liveCanvas.height = vh;
       offscreenCanvas.width = 640;
       offscreenCanvas.height = Math.round(640 * (vh / vw));
 
@@ -451,6 +472,7 @@
         }));
       } else {
         // Fallback REST call
+        inFlight = true;
         fetch('/api/live/process_frame', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -458,9 +480,10 @@
         })
         .then(r => r.json())
         .then(data => handleLiveTelemetry(data))
-        .catch(() => {});
+        .catch(() => {})
+        .finally(() => { inFlight = false; });
       }
-    }, 120); // ~8-10 FPS live inference sample
+    }, 120); // inference sampled at most every 120ms, one request in flight
   }
 
   function startBackendLivePoll() {
