@@ -187,11 +187,18 @@ class BallDetector:
         h, w = frame_bgr.shape[:2]
         raw_candidates: List[BallObservation] = []
 
-        # 1. Full-frame inference
-        # In 4K video (>1920px), full frame downsamples by 6x into 640, shrinking ball below detection limit.
-        # Skip full frame on 4K if tiling is active to save ~350ms per frame.
-        skip_full_frame = bool(self.use_tiling and (w > 1920 or h > 1920))
-        if not skip_full_frame:
+        # Overlapping pitch corridor tiled inference (targeted for cricket pitch corridor)
+        # When tiling is active, corridor tiles cover the pitch, avoiding redundant full-frame inference.
+        if self.use_tiling and (w > self.tile_w or h > self.tile_h):
+            _, tile_raw = self.tiled_engine.process_tiled_frame(
+                frame_bgr=frame_bgr,
+                frame_idx=frame_idx,
+                timestamp_sec=timestamp_sec,
+                predict_fn=self._predict_raw,
+                target_classes=self.target_classes
+            )
+            raw_candidates.extend(tile_raw)
+        else:
             full_dets = self._predict_raw(frame_bgr)
             for xyxy, conf, cls_id in full_dets:
                 if self.target_classes and cls_id not in self.target_classes:
@@ -207,19 +214,6 @@ class BallDetector:
                     detection_source="full_frame"
                 )
                 raw_candidates.append(obs)
-
-        # 2. Overlapping pitch corridor tiled inference (for tiny distant balls)
-        # Skip tiling if full-frame inference already found a confident candidate to optimize speed
-        has_confident_ball = any(c.confidence >= 0.28 for c in raw_candidates)
-        if self.use_tiling and not has_confident_ball and (w > self.tile_w or h > self.tile_h):
-            _, tile_raw = self.tiled_engine.process_tiled_frame(
-                frame_bgr=frame_bgr,
-                frame_idx=frame_idx,
-                timestamp_sec=timestamp_sec,
-                predict_fn=self._predict_raw,
-                target_classes=self.target_classes
-            )
-            raw_candidates.extend(tile_raw)
 
         # Store all raw candidates for audit trail before deduplication
         self.last_raw_candidates = list(raw_candidates)

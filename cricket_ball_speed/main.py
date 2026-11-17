@@ -10,6 +10,7 @@ import logging
 from typing import Optional, Dict, Any, Tuple
 import yaml
 import cv2
+import numpy as np
 import torch
 
 # Multi-threading optimization for CPU inference
@@ -147,50 +148,59 @@ class CricketSpeedPipeline:
 
     def locate_delivery_window(self, loader: VideoLoader, bowler_det: BowlerDetector) -> Tuple[int, int]:
         """
-        Fast temporal pre-scan to locate bowler delivery stride and active ball flight.
-        Skips dead walk-up time and celebration frames, focusing dense tracking on the
-        active delivery window (~150-180 frames).
+        Fast temporal pre-scan using motion energy profiling with edge suppression to locate
+        the active bowler delivery stride and ball flight window (~150-180 frames).
+        Prevents picking end-of-video celebration frames where bowler walks up to the camera.
         """
         total = loader.metadata.total_frames
         fps = loader.metadata.fps
         if total <= 250:
             return 0, total
 
-        stride = max(6, int(round(fps * 0.15)))
-        bowler_records = []
-
         cap = cv2.VideoCapture(loader.video_path)
-        idx = 0
-        while True:
-            if idx % stride == 0:
+        step = 4
+        prev_gray = None
+        motion_profile = []
+
+        for idx in range(total):
+            if idx % step == 0:
                 ret, frame = cap.read()
                 if not ret:
                     break
-                h, w = frame.shape[:2]
-                scale = 640.0 / max(w, h)
-                small = cv2.resize(frame, (int(w * scale), int(h * scale)))
-                obs = bowler_det.detect(small, idx, idx / fps)
-                if obs:
-                    orig_area = (obs.width / scale) * (obs.height / scale)
-                    bowler_records.append((idx, orig_area, obs.confidence))
+                small = cv2.resize(frame, (160, 90), interpolation=cv2.INTER_NEAREST)
+                gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
+                if prev_gray is not None:
+                    diff = cv2.absdiff(gray, prev_gray)
+                    val = float(np.mean(diff))
+                    motion_profile.append((idx, val))
+                prev_gray = gray
             else:
                 if not cap.grab():
                     break
-            idx += 1
         cap.release()
 
-        if not bowler_records:
+        if not motion_profile:
             return 0, total
 
-        max_rec = max(bowler_records, key=lambda x: x[1])
-        peak_frame = max_rec[0]
+        # Weight down extreme video edges (first 8% and last 12% where camera handling or walk-up occurs)
+        weighted = []
+        for idx, val in motion_profile:
+            t_rel = idx / float(total)
+            weight = 1.0
+            if t_rel < 0.08 or t_rel > 0.88:
+                weight = 0.35
+            weighted.append(val * weight)
 
-        window_before = int(round(fps * 0.7))
-        window_after = int(round(fps * 1.3))
+        window_sz = 5
+        smoothed = np.convolve(weighted, np.ones(window_sz) / window_sz, mode="same")
+        peak_idx = motion_profile[int(np.argmax(smoothed))][0]
 
-        start_frame = max(0, peak_frame - window_before)
-        end_frame = min(total, peak_frame + window_after)
-        return start_frame, end_frame
+        w_before = int(round(fps * 0.35))
+        w_after = int(round(fps * 0.75))
+
+        start_frame = max(0, peak_idx - w_before)
+        end_frame = min(total, peak_idx + w_after)
+        return start_frame, end_frame, peak_idx
 
     def process_delivery(
         self,
@@ -433,18 +443,25 @@ class CricketSpeedPipeline:
             ball_detector=ball_det,
             bowler_detector=bowler_det,
             stumps_detector=stumps_det,
-            bowler_interval=2
+            bowler_interval=3
         )
 
         refiner = BoundingBoxRefiner()
         quality_assessor = ObservationQualityAssessor()
-        outlier_rejector = OutlierRejector()
+
+        res_scale = max(metadata.width, metadata.height) / 1080.0
+        fps_norm = max(30.0, float(metadata.fps))
+        outlier_rejector = OutlierRejector(
+            max_interframe_displacement_px=140.0 * res_scale,
+            nominal_dt_sec=1.0 / fps_norm
+        )
         pred_mgr = PredictionManager(
-            max_consecutive_predictions=self.settings.get("tracking", {}).get("max_consecutive_predictions", 3)
+            max_consecutive_predictions=self.settings.get("tracking", {}).get("max_consecutive_predictions", 3),
+            max_pixel_distance=110.0 * res_scale * (60.0 / fps_norm)
         )
 
         # 3.5 Delivery Action Temporal Windowing
-        start_frame, end_frame = self.locate_delivery_window(loader, bowler_det)
+        start_frame, end_frame, peak_frame = self.locate_delivery_window(loader, bowler_det)
         self.logger.info(
             f"Targeting active delivery window: frames {start_frame}..{end_frame} "
             f"({end_frame - start_frame} frames out of {metadata.total_frames})"
@@ -453,8 +470,9 @@ class CricketSpeedPipeline:
         # 4. Sequential Detection and Tracking Pass
         self.logger.info("Executing detection and temporal tracking pass across delivery frames...")
         tot_f = max(1, end_frame - start_frame)
-        for frame_idx, ts, frame_bgr in loader.iter_frames(start_frame=start_frame, end_frame=end_frame):
-            if progress_callback and ((frame_idx - start_frame) % 4 == 0 or frame_idx == end_frame - 1):
+        step_stride = 2 if metadata.fps >= 50.0 else 1
+        for frame_idx, ts, frame_bgr in loader.iter_frames(start_frame=start_frame, end_frame=end_frame, step=step_stride):
+            if progress_callback and ((frame_idx - start_frame) % 4 == 0 or frame_idx >= end_frame - step_stride):
                 p_pct = 25.0 + 45.0 * ((frame_idx - start_frame) / tot_f)
                 progress_callback(p_pct, f"Tracking ball & bowler (frame {frame_idx + 1}/{end_frame})")
 
@@ -468,9 +486,11 @@ class CricketSpeedPipeline:
                 refined = refiner.refine(frame_bgr, c)
                 refined_cands.append(refined)
 
-            # Filter candidates through outlier rejector
+            # Filter candidates through outlier rejector with resolution-scaled dt
             last_accepted = pred_mgr.history[-1].observation if pred_mgr.history else None
-            accepted_cands = outlier_rejector.filter_candidates(refined_cands, last_accepted)
+            last_ts = pred_mgr.history[-1].timestamp_sec if pred_mgr.history else (ts - 1.0 / fps_norm)
+            dt_step = max(1e-4, ts - last_ts)
+            accepted_cands = outlier_rejector.filter_candidates(refined_cands, last_accepted, dt_sec=dt_step)
 
             # Step Kalman track
             pred_mgr.step(frame_idx, ts, accepted_cands)
@@ -554,7 +574,8 @@ class CricketSpeedPipeline:
                 raw_ball_observations=det_mgr.raw_ball_observations,
                 release_event=release_event,
                 radar_speed=radar_speed,
-                qc_result=qc_result
+                qc_result=qc_result,
+                delivery_peak_frame=peak_frame
             )
             release_speed = fallback_res["release_speed"]
             c1_c2_result = fallback_res["c1_c2_result"]

@@ -267,9 +267,9 @@ class TiledInferenceEngine:
         crop = frame_bgr[ty1:ty2, tx1:tx2]
         h, w = crop.shape[:2]
 
-        # For large crops, downscale to max 960px to accelerate neural inference
-        if max(h, w) > 960:
-            scale = 960.0 / max(h, w)
+        # For large crops, downscale to max 640px to match native YOLO resolution and accelerate CPU inference
+        if max(h, w) > 640:
+            scale = 640.0 / max(h, w)
             new_w = int(round(w * scale))
             new_h = int(round(h * scale))
             downscaled = cv2.resize(crop, (new_w, new_h), interpolation=cv2.INTER_AREA)
