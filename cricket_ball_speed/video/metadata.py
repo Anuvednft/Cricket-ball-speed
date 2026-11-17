@@ -51,13 +51,26 @@ class VideoMetadata:
         }
 
 
-def compute_file_hash(path: str, chunk_size: int = 65536) -> str:
-    """Computes a SHA-256 hash of the video file for locking calibrations."""
-    sha256 = hashlib.sha256()
-    with open(path, "rb") as f:
-        while chunk := f.read(chunk_size):
-            sha256.update(chunk)
-    return sha256.hexdigest()
+def compute_file_hash(path: str, chunk_size: int = 1048576) -> str:
+    """Computes a fast, collision-resistant hash of video file header, tail, and size."""
+    try:
+        file_size = os.path.getsize(path)
+        sha256 = hashlib.sha256()
+        sha256.update(str(file_size).encode("utf-8"))
+        with open(path, "rb") as f:
+            # First 1MB
+            sha256.update(f.read(chunk_size))
+            if file_size > chunk_size * 2:
+                f.seek(max(0, file_size - chunk_size))
+                sha256.update(f.read(chunk_size))
+        return sha256.hexdigest()
+    except Exception:
+        # Fallback to standard hash if seeking fails
+        sha256 = hashlib.sha256()
+        with open(path, "rb") as f:
+            while chunk := f.read(65536):
+                sha256.update(chunk)
+        return sha256.hexdigest()
 
 
 def extract_video_metadata(video_path: str) -> VideoMetadata:

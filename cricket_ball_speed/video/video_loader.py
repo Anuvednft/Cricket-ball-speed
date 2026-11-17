@@ -65,12 +65,12 @@ class VideoLoader:
         return self.decoder.read_frame(frame_idx)
 
     def iter_frames(
-        self, start_frame: int = 0, end_frame: Optional[int] = None
+        self, start_frame: int = 0, end_frame: Optional[int] = None, step: int = 1
     ) -> Generator[Tuple[int, float, np.ndarray], None, None]:
         """
         Yields (frame_idx, timestamp_seconds, frame_bgr) while updating stability metrics.
         """
-        for frame_idx, ts, frame in self.decoder.iter_frames(start_frame, end_frame):
+        for frame_idx, ts, frame in self.decoder.iter_frames(start_frame, end_frame, step=step):
             if self.stability_analyzer is not None:
                 self.stability_analyzer.process_frame(frame_idx, frame)
             yield frame_idx, ts, frame

@@ -37,7 +37,13 @@ class CameraStabilityAnalyzer:
         Processes a video frame to evaluate camera stability relative to earlier frames.
         Returns (is_stable, current_displacement).
         """
-        gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
+        h, w = frame_bgr.shape[:2]
+        scale = 480.0 / max(h, w) if max(h, w) > 480 else 1.0
+        if scale < 1.0:
+            small_bgr = cv2.resize(frame_bgr, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
+            gray = cv2.cvtColor(small_bgr, cv2.COLOR_BGR2GRAY)
+        else:
+            gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
 
         if self._prev_gray is None:
             self._prev_gray = gray

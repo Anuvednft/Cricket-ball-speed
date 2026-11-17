@@ -30,154 +30,309 @@
   <!-- Main Application Container -->
   <main class="main-container">
 
-    <!-- Simple Upload & Quick Test Section -->
-    <section class="upload-section">
-      <div id="uploadPanel" class="upload-card-dashed">
-        <div class="upload-icon-circle">⬆</div>
-        <h4>DRAG &amp; DROP CRICKET VIDEO OR CHOOSE FILE</h4>
-        <p>Upload a bowling video to instantly preview, play, and automatically detect speed.</p>
-        <span class="upload-specs">Supports MP4, MOV, AVI, WEBM • Up to 500 MB</span>
-        <input type="file" id="videoFileInput" accept=".mp4,.mov,.avi,.webm" style="display: none;">
-        <div style="margin-top: 14px;">
-          <button id="browseVideoBtn" class="btn btn-primary" style="width: auto; padding: 12px 32px; font-size: 15px;">
-            📁 Select Bowling Video
-          </button>
+    <!-- Mode Selector Cards -->
+    <section class="mode-selector-wrapper" style="margin-bottom: 24px;">
+      <div id="modeCardVideo" class="mode-card active">
+        <span class="mode-badge">Upload &amp; Analyze</span>
+        <div class="mode-icon">🎬</div>
+        <div class="mode-content">
+          <h3>INPUT VIDEO</h3>
+          <p>Upload a recorded bowling video for speed analysis.</p>
         </div>
       </div>
 
-      <!-- Quick Test Deliveries -->
-      <div class="sample-videos-bar">
-        <span class="sample-videos-title">⚡ Quick Test Videos:</span>
-        <div id="sampleChipsList" style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
-          <span style="font-size: 12px; color: #64748b;">Loading test deliveries...</span>
+      <div id="modeCardLive" class="mode-card">
+        <span class="mode-badge">Real-Time</span>
+        <div class="mode-icon">📹</div>
+        <div class="mode-content">
+          <h3>LIVE CAMERA</h3>
+          <p>Connect camera to record &amp; calculate bowling speed live.</p>
         </div>
       </div>
     </section>
 
-    <!-- Sleek Progress Bar (Visible while calculating) -->
-    <section id="analysisProgressCard" class="progress-card" style="display: none;">
-      <div class="progress-header">
-        <div style="display: flex; align-items: center; gap: 10px;">
-          <span class="spinner-icon"></span>
-          <span id="progressStageText" class="progress-stage-name">Processing bowling speed...</span>
+    <!-- =====================================================================
+         MODE 1: VIDEO UPLOAD & ANALYSIS VIEW
+         ===================================================================== -->
+    <div id="videoModeView" class="mode-view active">
+      <!-- Simple Upload & Quick Test Section -->
+      <section class="upload-section">
+        <div id="uploadPanel" class="upload-card-dashed">
+          <div class="upload-icon-circle">⬆</div>
+          <h4>DRAG &amp; DROP CRICKET VIDEO OR CHOOSE FILE</h4>
+          <p>Upload a bowling video to instantly preview, play, and automatically detect speed.</p>
+          <span class="upload-specs">Supports MP4, MOV, AVI, WEBM • Up to 500 MB</span>
+          <input type="file" id="videoFileInput" accept=".mp4,.mov,.avi,.webm" style="display: none;">
+          <div style="margin-top: 14px;">
+            <button id="browseVideoBtn" class="btn btn-primary" style="width: auto; padding: 12px 32px; font-size: 15px;">
+              📁 Select Bowling Video
+            </button>
+          </div>
         </div>
-        <span id="progressPctText" class="progress-pct-readout">0%</span>
-      </div>
-      <div class="progress-track">
-        <div id="progressFill" class="progress-fill"></div>
-      </div>
-    </section>
 
-    <!-- Main Player & Live Speed Layout -->
-    <section id="videoWorkspace" class="workspace-grid" style="display: none;">
+        <!-- Quick Test Deliveries -->
+        <div class="sample-videos-bar">
+          <span class="sample-videos-title">⚡ Quick Test Videos:</span>
+          <div id="sampleChipsList" style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+            <span style="font-size: 12px; color: #64748b;">Loading test deliveries...</span>
+          </div>
+        </div>
+      </section>
 
-      <!-- Left Column: Video Player with Live Speed Badge Overlay -->
-      <div class="viewport-card">
-        <div class="viewport-header">
+      <!-- Sleek Progress Bar (Visible while calculating) -->
+      <section id="analysisProgressCard" class="progress-card" style="display: none;">
+        <div class="progress-header">
           <div style="display: flex; align-items: center; gap: 10px;">
-            <h2 id="videoTitleText" class="viewport-title" style="margin: 0;">
-              <span>Video Preview</span>
-            </h2>
-            <span id="playerStateBadge" class="status-pill">Playing</span>
+            <span class="spinner-icon"></span>
+            <span id="progressStageText" class="progress-stage-name">Processing bowling speed...</span>
           </div>
+          <span id="progressPctText" class="progress-pct-readout">0%</span>
         </div>
+        <div class="progress-track">
+          <div id="progressFill" class="progress-fill"></div>
+        </div>
+      </section>
 
-        <!-- Video Player Wrapper with Broadcast Speed Overlay -->
-        <div class="player-container">
-          <video id="mainVideoPlayer" class="html5-video-player" controls playsinline preload="auto"></video>
-          
-          <!-- Broadcast-style live speed badge overlaid directly on the video -->
-          <div id="liveVideoBadge" class="live-video-speed-badge" style="display: none;">
-            <div class="live-badge-title">BOWLING SPEED</div>
-            <div class="live-badge-speed">
-              <span id="liveBadgeSpeedVal">--.-</span> <span class="live-badge-unit">KM/H</span>
+      <!-- Main Player & Live Speed Layout -->
+      <section id="videoWorkspace" class="workspace-grid" style="display: none;">
+
+        <!-- Left Column: Video Player with Live Speed Badge Overlay -->
+        <div class="viewport-card">
+          <div class="viewport-header">
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <h2 id="videoTitleText" class="viewport-title" style="margin: 0;">
+                <span>Video Preview</span>
+              </h2>
+              <span id="playerStateBadge" class="status-pill">Playing</span>
             </div>
-            <div id="liveBadgeStatus" class="live-badge-status">ESTIMATED</div>
+          </div>
+
+          <!-- Video Player Wrapper with Broadcast Speed Overlay -->
+          <div class="player-container">
+            <video id="mainVideoPlayer" class="html5-video-player" controls playsinline preload="auto"></video>
+            
+            <!-- Broadcast-style live speed badge overlaid directly on the video -->
+            <div id="liveVideoBadge" class="live-video-speed-badge" style="display: none;">
+              <div class="live-badge-title">BOWLING SPEED</div>
+              <div class="live-badge-speed">
+                <span id="liveBadgeSpeedVal">--.-</span> <span class="live-badge-unit">KM/H</span>
+              </div>
+              <div id="liveBadgeStatus" class="live-badge-status">ESTIMATED</div>
+            </div>
+          </div>
+
+          <!-- Clean Metadata Footer -->
+          <div class="video-meta-footer">
+            <div class="meta-item">
+              <span class="meta-label">File:</span>
+              <span id="metaFilename" class="meta-val">--</span>
+            </div>
+            <div class="meta-item">
+              <span class="meta-label">Resolution:</span>
+              <span id="metaResolution" class="meta-val">--</span>
+            </div>
+            <div class="meta-item">
+              <span class="meta-label">FPS:</span>
+              <span id="metaFps" class="meta-val">--</span>
+            </div>
+            <div class="meta-item">
+              <span class="meta-label">Duration:</span>
+              <span id="metaDuration" class="meta-val">--</span>
+            </div>
           </div>
         </div>
 
-        <!-- Clean Metadata Footer -->
-        <div class="video-meta-footer">
-          <div class="meta-item">
-            <span class="meta-label">File:</span>
-            <span id="metaFilename" class="meta-val">--</span>
+        <!-- Right Column: Prominent Speed Card & Key Results -->
+        <aside class="side-panel">
+
+          <!-- Speed Hero Card -->
+          <div class="speed-hero-card">
+            <span class="speed-title">⚡ Bowling Release Speed</span>
+            <div class="speed-readout">
+              <span id="speedDisplayNumber">--.-</span>
+              <span class="speed-unit">KM/H</span>
+            </div>
+            <div id="speedMphDisplay" style="font-size: 14px; font-weight: 600; color: #94a3b8; margin-top: -4px;">
+              --.- mph
+            </div>
+
+            <div style="margin-top: 10px;">
+              <div id="speedStatusBadge" class="measurement-pill not-measured">
+                CALCULATING...
+              </div>
+            </div>
+
+            <div id="speedUncertaintyText" class="speed-uncertainty-text">
+              ±0.0 km/h uncertainty
+            </div>
+
+            <div class="speed-submetrics" style="margin-top: 18px;">
+              <div class="submetric-item">
+                <span class="submetric-label">Release-to-Crease</span>
+                <span id="c1c2SpeedVal" class="submetric-val">--.- km/h</span>
+              </div>
+              <div class="submetric-item">
+                <span class="submetric-label">Quality Score</span>
+                <span id="qcScoreVal" class="submetric-val">-- / 100</span>
+              </div>
+            </div>
           </div>
-          <div class="meta-item">
-            <span class="meta-label">Resolution:</span>
-            <span id="metaResolution" class="meta-val">--</span>
+
+          <!-- Clean Export Options -->
+          <div id="downloadsPanel" class="panel-card" style="padding: 18px;">
+            <div class="panel-header" style="margin-bottom: 12px;">
+              <h3 class="panel-title" style="font-size: 15px;">📥 Export Analysis</h3>
+            </div>
+            <div style="display: flex; gap: 10px; flex-direction: column;">
+              <a id="dlExcelReport" class="download-tile disabled" href="#" download style="padding: 12px; display: flex; align-items: center; gap: 12px;">
+                <span class="download-icon" style="font-size: 22px;">📊</span>
+                <div>
+                  <strong style="display: block; font-size: 14px;">Download Excel Report</strong>
+                  <small style="color: #64748b;">Complete telemetry summary (.xlsx)</small>
+                </div>
+              </a>
+              <a id="dlJsonReport" class="download-tile disabled" href="#" download style="padding: 12px; display: flex; align-items: center; gap: 12px;">
+                <span class="download-icon" style="font-size: 22px;">📄</span>
+                <div>
+                  <strong style="display: block; font-size: 14px;">Download JSON Report</strong>
+                  <small style="color: #64748b;">Raw kinematics audit (.json)</small>
+                </div>
+              </a>
+            </div>
           </div>
-          <div class="meta-item">
-            <span class="meta-label">FPS:</span>
-            <span id="metaFps" class="meta-val">--</span>
+
+        </aside>
+      </section>
+    </div>
+
+    <!-- =====================================================================
+         MODE 2: LIVE CAMERA VIEW
+         ===================================================================== -->
+    <div id="liveModeView" class="mode-view">
+      <div class="workspace-grid">
+
+        <!-- Left Column: Live Camera Viewport -->
+        <div class="viewport-card">
+          <div class="viewport-header">
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <h2 class="viewport-title" style="margin: 0;">
+                <span>Live Video Stream</span>
+              </h2>
+              <span id="cameraStateBadge" class="status-pill">Offline</span>
+            </div>
+
+            <div class="viewport-controls" style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+              <select id="cameraDeviceSelect" class="header-btn" style="min-width: 170px; padding: 6px 12px; font-size: 13px;">
+                <option value="default">Default Camera</option>
+              </select>
+              <button id="startCameraBtn" class="btn btn-primary" style="width: auto; padding: 8px 18px; font-size: 13px;">
+                ▶ Start Camera
+              </button>
+              <button id="stopCameraBtn" class="btn btn-danger" style="width: auto; padding: 8px 18px; font-size: 13px; display: none;">
+                ⏹ Stop Camera
+              </button>
+              <button id="recordDeliveryBtn" class="btn btn-primary" style="width: auto; padding: 8px 18px; font-size: 13px; background: #dc2626; display: none;">
+                🔴 Record Delivery
+              </button>
+              <button id="stopRecordBtn" class="btn btn-warning" style="width: auto; padding: 8px 18px; font-size: 13px; display: none;">
+                ⏹ Finish &amp; Detect Speed
+              </button>
+            </div>
           </div>
-          <div class="meta-item">
-            <span class="meta-label">Duration:</span>
-            <span id="metaDuration" class="meta-val">--</span>
+
+          <!-- Live Video Canvas Container -->
+          <div class="canvas-container" style="position: relative; width: 100%; aspect-ratio: 16/9; background: #000; border-radius: 12px; overflow: hidden; display: flex; align-items: center; justify-content: center;">
+            <video id="liveVideo" autoplay playsinline muted style="display: none; width: 100%; height: 100%; object-fit: contain;"></video>
+            <canvas id="liveCanvas" class="canvas-overlay" style="width: 100%; height: 100%; object-fit: contain;"></canvas>
+
+            <div id="cameraPlaceholder" style="color: #94a3b8; text-align: center; padding: 40px;">
+              <div style="font-size: 48px; margin-bottom: 12px;">📹</div>
+              <h3 style="color: #e2e8f0; margin-bottom: 6px;">Camera Inactive</h3>
+              <p style="font-size: 13px; max-width: 380px; margin: 0 auto; color: #64748b;">
+                Select your camera device above and click "Start Camera" to stream live video, track pitch crease, and record bowling deliveries.
+              </p>
+            </div>
+
+            <!-- Canvas HUD -->
+            <div class="canvas-hud">
+              <div id="liveCameraBadge" class="hud-badge warning">
+                <span>CAMERA:</span> <strong id="liveCameraBadgeText">Offline</strong>
+              </div>
+              <div id="liveStumpsBadge" class="hud-badge warning">
+                <span>STUMPS:</span> <strong id="liveStumpsBadgeText">Searching...</strong>
+              </div>
+              <div id="liveDrsBadge" class="hud-badge drs" style="display: none;">
+                <span>DRS:</span> <strong id="liveDrsBadgeText">20.12m Pitch Active</strong>
+              </div>
+              <div id="liveRecordIndicator" class="hud-badge danger" style="display: none;">
+                <span>REC:</span> <strong id="liveRecordTimer">00:00</strong>
+              </div>
+            </div>
+          </div>
+
+          <!-- Live Calibration & Controls Footer -->
+          <div class="video-meta-footer" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+            <div style="display: flex; gap: 10px;">
+              <button id="liveAutoCalibBtn" class="btn btn-secondary" style="width: auto; padding: 8px 16px; font-size: 13px;" disabled>
+                🎯 Auto-Calibrate Pitch
+              </button>
+            </div>
+            <div style="display: flex; gap: 14px; font-size: 13px; color: #64748b;">
+              <span>Resolution: <strong id="liveResolutionText" style="color: #0f172a;">--</strong></span>
+              <span>FPS: <strong id="liveFpsText" style="color: #0f172a;">--</strong></span>
+            </div>
           </div>
         </div>
+
+        <!-- Right Column: Live Speed Results & Delivery History -->
+        <aside class="side-panel">
+
+          <!-- Live Speed Card -->
+          <div class="speed-hero-card">
+            <span class="speed-title">⚡ Live Delivery Speed</span>
+            <div class="speed-readout">
+              <span id="liveSpeedNumber">--.-</span>
+              <span class="speed-unit">KM/H</span>
+            </div>
+            <div id="liveSpeedMph" style="font-size: 14px; font-weight: 600; color: #94a3b8; margin-top: -4px;">
+              --.- mph
+            </div>
+
+            <div style="margin-top: 10px;">
+              <div id="liveSpeedStatusBadge" class="measurement-pill not-measured">
+                AWAITING DELIVERY
+              </div>
+            </div>
+
+            <div class="speed-submetrics" style="margin-top: 18px;">
+              <div class="submetric-item">
+                <span class="submetric-label">Release-to-Crease</span>
+                <span id="liveC1C2Speed" class="submetric-val">--.- km/h</span>
+              </div>
+              <div class="submetric-item">
+                <span class="submetric-label">Quality Score</span>
+                <span id="liveQcScore" class="submetric-val">-- / 100</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Session Deliveries Log -->
+          <div class="panel-card" style="padding: 18px;">
+            <div class="panel-header" style="margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center;">
+              <h3 class="panel-title" style="font-size: 15px;">📋 Session Deliveries</h3>
+              <span id="deliveryCountBadge" class="status-pill" style="font-size: 11px;">0 Bowled</span>
+            </div>
+            <div id="liveDeliveriesList" style="display: flex; flex-direction: column; gap: 8px; max-height: 260px; overflow-y: auto;">
+              <div id="liveEmptyDeliveriesMsg" style="font-size: 12px; color: #94a3b8; text-align: center; padding: 16px 0;">
+                No live deliveries recorded yet.<br>Click "Record Delivery" to analyze a ball.
+              </div>
+            </div>
+          </div>
+
+        </aside>
+
       </div>
-
-      <!-- Right Column: Prominent Speed Card & Key Results -->
-      <aside class="side-panel">
-
-        <!-- Speed Hero Card -->
-        <div class="speed-hero-card">
-          <span class="speed-title">⚡ Bowling Release Speed</span>
-          <div class="speed-readout">
-            <span id="speedDisplayNumber">--.-</span>
-            <span class="speed-unit">KM/H</span>
-          </div>
-          <div id="speedMphDisplay" style="font-size: 14px; font-weight: 600; color: #94a3b8; margin-top: -4px;">
-            --.- mph
-          </div>
-
-          <div style="margin-top: 10px;">
-            <div id="speedStatusBadge" class="measurement-pill not-measured">
-              CALCULATING...
-            </div>
-          </div>
-
-          <div id="speedUncertaintyText" class="speed-uncertainty-text">
-            ±0.0 km/h uncertainty
-          </div>
-
-          <div class="speed-submetrics" style="margin-top: 18px;">
-            <div class="submetric-item">
-              <span class="submetric-label">Release-to-Crease</span>
-              <span id="c1c2SpeedVal" class="submetric-val">--.- km/h</span>
-            </div>
-            <div class="submetric-item">
-              <span class="submetric-label">Quality Score</span>
-              <span id="qcScoreVal" class="submetric-val">-- / 100</span>
-            </div>
-          </div>
-        </div>
-
-        <!-- Clean Export Options -->
-        <div id="downloadsPanel" class="panel-card" style="padding: 18px;">
-          <div class="panel-header" style="margin-bottom: 12px;">
-            <h3 class="panel-title" style="font-size: 15px;">📥 Export Analysis</h3>
-          </div>
-          <div style="display: flex; gap: 10px; flex-direction: column;">
-            <a id="dlExcelReport" class="download-tile disabled" href="#" download style="padding: 12px; display: flex; align-items: center; gap: 12px;">
-              <span class="download-icon" style="font-size: 22px;">📊</span>
-              <div>
-                <strong style="display: block; font-size: 14px;">Download Excel Report</strong>
-                <small style="color: #64748b;">Complete telemetry summary (.xlsx)</small>
-              </div>
-            </a>
-            <a id="dlJsonReport" class="download-tile disabled" href="#" download style="padding: 12px; display: flex; align-items: center; gap: 12px;">
-              <span class="download-icon" style="font-size: 22px;">📄</span>
-              <div>
-                <strong style="display: block; font-size: 14px;">Download JSON Report</strong>
-                <small style="color: #64748b;">Raw kinematics audit (.json)</small>
-              </div>
-            </a>
-          </div>
-        </div>
-
-      </aside>
-    </section>
+    </div>
 
   </main>
 

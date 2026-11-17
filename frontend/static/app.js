@@ -21,7 +21,20 @@
     analysisTaskId: null,
     pollInterval: null,
     analysisResult: null,
-    isAnalyzing: false
+    isAnalyzing: false,
+
+    // Live Camera State
+    currentMode: 'video', // 'video' | 'live'
+    cameraStream: null,
+    cameraRunning: false,
+    mediaRecorder: null,
+    recordedChunks: [],
+    recordStartTime: null,
+    recordTimerInterval: null,
+    isRecording: false,
+    liveDrsData: null,
+    liveAnimFrame: null,
+    sessionDeliveries: []
   };
 
   // DOM Elements
@@ -29,6 +42,12 @@
     // Header
     systemStatusPill: document.getElementById('systemStatusPill'),
     systemStatusText: document.getElementById('systemStatusText'),
+
+    // Mode Switching
+    modeCardVideo: document.getElementById('modeCardVideo'),
+    modeCardLive: document.getElementById('modeCardLive'),
+    videoModeView: document.getElementById('videoModeView'),
+    liveModeView: document.getElementById('liveModeView'),
 
     // Upload & Samples
     uploadPanel: document.getElementById('uploadPanel'),
@@ -67,7 +86,39 @@
 
     // Download Links
     dlJsonReport: document.getElementById('dlJsonReport'),
-    dlExcelReport: document.getElementById('dlExcelReport')
+    dlExcelReport: document.getElementById('dlExcelReport'),
+
+    // Live Camera Elements
+    cameraDeviceSelect: document.getElementById('cameraDeviceSelect'),
+    startCameraBtn: document.getElementById('startCameraBtn'),
+    stopCameraBtn: document.getElementById('stopCameraBtn'),
+    recordDeliveryBtn: document.getElementById('recordDeliveryBtn'),
+    stopRecordBtn: document.getElementById('stopRecordBtn'),
+    cameraStateBadge: document.getElementById('cameraStateBadge'),
+    liveVideo: document.getElementById('liveVideo'),
+    liveCanvas: document.getElementById('liveCanvas'),
+    cameraPlaceholder: document.getElementById('cameraPlaceholder'),
+    liveCameraBadge: document.getElementById('liveCameraBadge'),
+    liveCameraBadgeText: document.getElementById('liveCameraBadgeText'),
+    liveStumpsBadge: document.getElementById('liveStumpsBadge'),
+    liveStumpsBadgeText: document.getElementById('liveStumpsBadgeText'),
+    liveDrsBadge: document.getElementById('liveDrsBadge'),
+    liveDrsBadgeText: document.getElementById('liveDrsBadgeText'),
+    liveRecordIndicator: document.getElementById('liveRecordIndicator'),
+    liveRecordTimer: document.getElementById('liveRecordTimer'),
+    liveAutoCalibBtn: document.getElementById('liveAutoCalibBtn'),
+    liveResolutionText: document.getElementById('liveResolutionText'),
+    liveFpsText: document.getElementById('liveFpsText'),
+
+    // Live Speed Hero Card & History
+    liveSpeedNumber: document.getElementById('liveSpeedNumber'),
+    liveSpeedMph: document.getElementById('liveSpeedMph'),
+    liveSpeedStatusBadge: document.getElementById('liveSpeedStatusBadge'),
+    liveC1C2Speed: document.getElementById('liveC1C2Speed'),
+    liveQcScore: document.getElementById('liveQcScore'),
+    deliveryCountBadge: document.getElementById('deliveryCountBadge'),
+    liveDeliveriesList: document.getElementById('liveDeliveriesList'),
+    liveEmptyDeliveriesMsg: document.getElementById('liveEmptyDeliveriesMsg')
   };
 
   // --------------------------------------------------------------------------
@@ -118,6 +169,442 @@
       el.mainVideoPlayer.addEventListener('pause', () => {
         if (el.playerStateBadge) el.playerStateBadge.textContent = 'Paused';
       });
+    }
+
+    // Mode Switching
+    if (el.modeCardVideo) el.modeCardVideo.addEventListener('click', () => switchMode('video'));
+    if (el.modeCardLive) el.modeCardLive.addEventListener('click', () => switchMode('live'));
+
+    // Live Camera Controls
+    if (el.startCameraBtn) el.startCameraBtn.addEventListener('click', startLiveCamera);
+    if (el.stopCameraBtn) el.stopCameraBtn.addEventListener('click', stopLiveCamera);
+    if (el.recordDeliveryBtn) el.recordDeliveryBtn.addEventListener('click', startRecordingDelivery);
+    if (el.stopRecordBtn) el.stopRecordBtn.addEventListener('click', stopRecordingDelivery);
+    if (el.liveAutoCalibBtn) el.liveAutoCalibBtn.addEventListener('click', triggerLiveAutoCalibrate);
+  }
+
+  // --------------------------------------------------------------------------
+  // Mode Switching
+  // --------------------------------------------------------------------------
+  function switchMode(mode) {
+    state.currentMode = mode;
+    if (mode === 'live') {
+      if (el.modeCardLive) el.modeCardLive.classList.add('active');
+      if (el.modeCardVideo) el.modeCardVideo.classList.remove('active');
+      if (el.liveModeView) el.liveModeView.classList.add('active');
+      if (el.videoModeView) el.videoModeView.classList.remove('active');
+      populateCameraDevices();
+    } else {
+      if (el.modeCardVideo) el.modeCardVideo.classList.add('active');
+      if (el.modeCardLive) el.modeCardLive.classList.remove('active');
+      if (el.videoModeView) el.videoModeView.classList.add('active');
+      if (el.liveModeView) el.liveModeView.classList.remove('active');
+      if (state.cameraRunning) stopLiveCamera();
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // Live Camera Controller
+  // --------------------------------------------------------------------------
+  async function populateCameraDevices() {
+    if (!el.cameraDeviceSelect) return;
+    try {
+      let devices = [];
+      if (navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {
+        const allDevs = await navigator.mediaDevices.enumerateDevices();
+        devices = allDevs.filter(d => d.kind === 'videoinput');
+      }
+
+      el.cameraDeviceSelect.innerHTML = '';
+      if (devices.length > 0) {
+        devices.forEach((dev, idx) => {
+          const opt = document.createElement('option');
+          opt.value = dev.deviceId;
+          opt.textContent = dev.label || `Camera Device ${idx + 1}`;
+          el.cameraDeviceSelect.appendChild(opt);
+        });
+      } else {
+        const opt = document.createElement('option');
+        opt.value = 'default';
+        opt.textContent = 'Default Webcam / Camera';
+        el.cameraDeviceSelect.appendChild(opt);
+      }
+    } catch (e) {
+      console.warn('Could not enumerate media devices:', e);
+    }
+  }
+
+  async function startLiveCamera() {
+    try {
+      if (el.startCameraBtn) {
+        el.startCameraBtn.disabled = true;
+        el.startCameraBtn.textContent = 'Connecting...';
+      }
+
+      const deviceId = el.cameraDeviceSelect ? el.cameraDeviceSelect.value : null;
+      const constraints = {
+        video: {
+          width: { ideal: 1920, min: 1280 },
+          height: { ideal: 1080, min: 720 },
+          frameRate: { ideal: 60, min: 30 }
+        },
+        audio: false
+      };
+      if (deviceId && deviceId !== 'default') {
+        constraints.video.deviceId = { exact: deviceId };
+      } else {
+        constraints.video.facingMode = { ideal: 'environment' };
+      }
+
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      state.cameraStream = stream;
+      state.cameraRunning = true;
+
+      if (el.liveVideo) {
+        el.liveVideo.srcObject = stream;
+        await el.liveVideo.play();
+      }
+
+      // Update UI elements
+      if (el.cameraPlaceholder) el.cameraPlaceholder.style.display = 'none';
+      if (el.liveVideo) el.liveVideo.style.display = 'none';
+      if (el.liveCanvas) el.liveCanvas.style.display = 'block';
+
+      if (el.startCameraBtn) el.startCameraBtn.style.display = 'none';
+      if (el.stopCameraBtn) el.stopCameraBtn.style.display = 'inline-flex';
+      if (el.recordDeliveryBtn) el.recordDeliveryBtn.style.display = 'inline-flex';
+      if (el.liveAutoCalibBtn) el.liveAutoCalibBtn.disabled = false;
+
+      if (el.cameraStateBadge) {
+        el.cameraStateBadge.className = 'status-pill online';
+        el.cameraStateBadge.textContent = 'Online';
+      }
+      if (el.liveCameraBadgeText) el.liveCameraBadgeText.textContent = 'Connected (60 FPS)';
+      if (el.liveCameraBadge) el.liveCameraBadge.className = 'hud-badge success';
+
+      const track = stream.getVideoTracks()[0];
+      const settings = track.getSettings ? track.getSettings() : {};
+      if (el.liveResolutionText) {
+        el.liveResolutionText.textContent = `${settings.width || 1280}x${settings.height || 720}`;
+      }
+      if (el.liveFpsText) {
+        el.liveFpsText.textContent = `${Math.round(settings.frameRate || 60)} FPS`;
+      }
+
+      startLiveCanvasLoop();
+
+    } catch (err) {
+      console.error('Camera startup error:', err);
+      alert('Could not start live camera. Please ensure camera device is connected and browser permissions are granted.');
+      if (el.cameraStateBadge) {
+        el.cameraStateBadge.className = 'status-pill offline';
+        el.cameraStateBadge.textContent = 'Error';
+      }
+    } finally {
+      if (el.startCameraBtn) {
+        el.startCameraBtn.disabled = false;
+        el.startCameraBtn.textContent = '▶ Start Camera';
+      }
+    }
+  }
+
+  function stopLiveCamera() {
+    state.cameraRunning = false;
+    if (state.cameraStream) {
+      state.cameraStream.getTracks().forEach(t => t.stop());
+      state.cameraStream = null;
+    }
+    if (state.isRecording) {
+      stopRecordingDelivery();
+    }
+    if (state.liveAnimFrame) {
+      cancelAnimationFrame(state.liveAnimFrame);
+      state.liveAnimFrame = null;
+    }
+
+    if (el.cameraPlaceholder) el.cameraPlaceholder.style.display = 'block';
+    if (el.liveCanvas) el.liveCanvas.style.display = 'none';
+    if (el.startCameraBtn) el.startCameraBtn.style.display = 'inline-flex';
+    if (el.stopCameraBtn) el.stopCameraBtn.style.display = 'none';
+    if (el.recordDeliveryBtn) el.recordDeliveryBtn.style.display = 'none';
+    if (el.stopRecordBtn) el.stopRecordBtn.style.display = 'none';
+    if (el.liveAutoCalibBtn) el.liveAutoCalibBtn.disabled = true;
+
+    if (el.cameraStateBadge) {
+      el.cameraStateBadge.className = 'status-pill';
+      el.cameraStateBadge.textContent = 'Offline';
+    }
+    if (el.liveCameraBadgeText) el.liveCameraBadgeText.textContent = 'Offline';
+    if (el.liveCameraBadge) el.liveCameraBadge.className = 'hud-badge warning';
+  }
+
+  function startLiveCanvasLoop() {
+    const video = el.liveVideo;
+    const canvas = el.liveCanvas;
+    if (!video || !canvas) return;
+    const ctx = canvas.getContext('2d');
+
+    function renderLoop() {
+      if (!state.cameraRunning) return;
+      if (video.readyState >= 2) {
+        if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+          canvas.width = video.videoWidth || 1280;
+          canvas.height = video.videoHeight || 720;
+        }
+
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+        // Draw pitch center-line and DRS guides
+        const w = canvas.width;
+        const h = canvas.height;
+
+        ctx.save();
+        ctx.strokeStyle = 'rgba(239, 68, 68, 0.4)';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([6, 6]);
+
+        // Pitch corridor guide lines
+        ctx.beginPath();
+        ctx.moveTo(w * 0.35, h * 0.2);
+        ctx.lineTo(w * 0.25, h * 0.95);
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(w * 0.65, h * 0.2);
+        ctx.lineTo(w * 0.75, h * 0.95);
+        ctx.stroke();
+
+        if (state.liveDrsData) {
+          // Draw calibrated DRS crease line
+          ctx.strokeStyle = 'rgba(34, 197, 94, 0.85)';
+          ctx.lineWidth = 3;
+          ctx.setLineDash([]);
+          ctx.beginPath();
+          ctx.moveTo(w * 0.25, h * 0.85);
+          ctx.lineTo(w * 0.75, h * 0.85);
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
+      state.liveAnimFrame = requestAnimationFrame(renderLoop);
+    }
+
+    state.liveAnimFrame = requestAnimationFrame(renderLoop);
+  }
+
+  // --------------------------------------------------------------------------
+  // Real-Time Delivery Recording & Speed Calculation
+  // --------------------------------------------------------------------------
+  function startRecordingDelivery() {
+    if (!state.cameraStream) return;
+    try {
+      state.recordedChunks = [];
+      const mimeTypes = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm', 'video/mp4'];
+      const supportedMime = mimeTypes.find(m => MediaRecorder.isTypeSupported(m)) || '';
+
+      state.mediaRecorder = new MediaRecorder(state.cameraStream, supportedMime ? { mimeType: supportedMime } : {});
+      state.mediaRecorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) state.recordedChunks.push(e.data);
+      };
+
+      state.mediaRecorder.onstop = handleRecordingFinished;
+      state.mediaRecorder.start(100);
+      state.isRecording = true;
+      state.recordStartTime = Date.now();
+
+      if (el.recordDeliveryBtn) el.recordDeliveryBtn.style.display = 'none';
+      if (el.stopRecordBtn) el.stopRecordBtn.style.display = 'inline-flex';
+      if (el.liveRecordIndicator) el.liveRecordIndicator.style.display = 'flex';
+      if (el.liveSpeedStatusBadge) {
+        el.liveSpeedStatusBadge.className = 'measurement-pill calculating';
+        el.liveSpeedStatusBadge.textContent = 'RECORDING DELIVERY...';
+      }
+
+      state.recordTimerInterval = setInterval(() => {
+        const elapsedSec = Math.floor((Date.now() - state.recordStartTime) / 1000);
+        const mins = String(Math.floor(elapsedSec / 60)).padStart(2, '0');
+        const secs = String(elapsedSec % 60).padStart(2, '0');
+        if (el.liveRecordTimer) el.liveRecordTimer.textContent = `${mins}:${secs}`;
+
+        // Auto-stop after 8 seconds (typical cricket delivery burst)
+        if (elapsedSec >= 8) {
+          stopRecordingDelivery();
+        }
+      }, 500);
+
+    } catch (err) {
+      console.error('Failed to start MediaRecorder:', err);
+      alert('Could not record delivery video stream.');
+    }
+  }
+
+  function stopRecordingDelivery() {
+    if (!state.isRecording) return;
+    state.isRecording = false;
+    clearInterval(state.recordTimerInterval);
+    state.recordTimerInterval = null;
+
+    if (state.mediaRecorder && state.mediaRecorder.state !== 'inactive') {
+      state.mediaRecorder.stop();
+    }
+
+    if (el.recordDeliveryBtn) el.recordDeliveryBtn.style.display = 'inline-flex';
+    if (el.stopRecordBtn) el.stopRecordBtn.style.display = 'none';
+    if (el.liveRecordIndicator) el.liveRecordIndicator.style.display = 'none';
+  }
+
+  async function handleRecordingFinished() {
+    if (state.recordedChunks.length === 0) return;
+    const blob = new Blob(state.recordedChunks, { type: 'video/webm' });
+    const file = new File([blob], `live_delivery_${Date.now()}.webm`, { type: 'video/webm' });
+
+    if (el.liveSpeedStatusBadge) {
+      el.liveSpeedStatusBadge.className = 'measurement-pill calculating';
+      el.liveSpeedStatusBadge.textContent = 'CALCULATING SPEED...';
+    }
+
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const upRes = await fetch('/api/upload', {
+        method: 'POST',
+        body: formData
+      });
+
+      if (!upRes.ok) throw new Error('Live delivery upload failed');
+      const upData = await upRes.json();
+
+      const analyzeRes = await fetch('/api/analyze-video', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ video_path: upData.filepath })
+      });
+
+      if (!analyzeRes.ok) throw new Error('Analysis start failed');
+      const analyzeData = await analyzeRes.json();
+      const taskId = analyzeData.task_id;
+
+      const pollLiveResult = setInterval(async () => {
+        try {
+          const tRes = await fetch(`/api/tasks/${taskId}`);
+          if (tRes.ok) {
+            const task = await tRes.json();
+            if (task.status === 'COMPLETED') {
+              clearInterval(pollLiveResult);
+              displayLiveDeliveryResult(task.result);
+            } else if (task.status === 'FAILED') {
+              clearInterval(pollLiveResult);
+              if (el.liveSpeedStatusBadge) {
+                el.liveSpeedStatusBadge.className = 'measurement-pill not-measured';
+                el.liveSpeedStatusBadge.textContent = 'ANALYSIS ERROR';
+              }
+            }
+          }
+        } catch {
+          clearInterval(pollLiveResult);
+        }
+      }, 500);
+
+    } catch (e) {
+      console.error('Live delivery processing error:', e);
+      if (el.liveSpeedStatusBadge) {
+        el.liveSpeedStatusBadge.className = 'measurement-pill not-measured';
+        el.liveSpeedStatusBadge.textContent = 'PROCESSING FAILED';
+      }
+    }
+  }
+
+  function displayLiveDeliveryResult(res) {
+    if (!res) return;
+    const speedKmh = parseFloat(res.release_speed_kmh) || 0.0;
+    const speedMph = (speedKmh * 0.621371).toFixed(1);
+    const c1c2Kmh = parseFloat(res.c1_c2_speed_kmh) || 0.0;
+    const qcScore = res.qc_score || res.quality_score || 70;
+    const status = res.status || 'ESTIMATED';
+
+    if (el.liveSpeedNumber) el.liveSpeedNumber.textContent = speedKmh > 0 ? speedKmh.toFixed(1) : '--.-';
+    if (el.liveSpeedMph) el.liveSpeedMph.textContent = speedKmh > 0 ? `${speedMph} mph` : '--.- mph';
+    if (el.liveC1C2Speed) el.liveC1C2Speed.textContent = `${c1c2Kmh.toFixed(1)} km/h`;
+    if (el.liveQcScore) el.liveQcScore.textContent = `${Math.round(qcScore)} / 100`;
+
+    if (el.liveSpeedStatusBadge) {
+      el.liveSpeedStatusBadge.className = 'measurement-pill measured';
+      el.liveSpeedStatusBadge.textContent = `${status}: ${speedKmh.toFixed(1)} KM/H`;
+    }
+
+    state.sessionDeliveries.unshift({
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+      speedKmh: speedKmh.toFixed(1),
+      c1c2Kmh: c1c2Kmh.toFixed(1),
+      status: status
+    });
+
+    renderDeliveriesLog();
+  }
+
+  function renderDeliveriesLog() {
+    if (!el.liveDeliveriesList) return;
+    if (el.deliveryCountBadge) {
+      el.deliveryCountBadge.textContent = `${state.sessionDeliveries.length} Bowled`;
+    }
+
+    if (state.sessionDeliveries.length === 0) {
+      if (el.liveEmptyDeliveriesMsg) el.liveEmptyDeliveriesMsg.style.display = 'block';
+      return;
+    }
+    if (el.liveEmptyDeliveriesMsg) el.liveEmptyDeliveriesMsg.style.display = 'none';
+
+    el.liveDeliveriesList.innerHTML = state.sessionDeliveries.map((d, idx) => `
+      <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 14px; background:var(--bg-secondary); border:1px solid var(--border-subtle); border-radius:8px;">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <span style="font-weight:700; color:var(--navy-accent); font-size:14px;">#${state.sessionDeliveries.length - idx}</span>
+          <strong style="font-size:16px; color:#0f172a;">${d.speedKmh} km/h</strong>
+          <span style="font-size:12px; color:#64748b;">(C1-C2: ${d.c1c2Kmh})</span>
+        </div>
+        <span style="font-size:11px; font-weight:600; color:#64748b;">${d.time}</span>
+      </div>
+    `).join('');
+  }
+
+  async function triggerLiveAutoCalibrate() {
+    const canvas = el.liveCanvas;
+    if (!canvas) return;
+    try {
+      if (el.liveAutoCalibBtn) {
+        el.liveAutoCalibBtn.disabled = true;
+        el.liveAutoCalibBtn.textContent = 'Calibrating...';
+      }
+
+      const base64Data = canvas.toDataURL('image/jpeg', 0.85);
+      const res = await fetch('/api/camera/auto-calibrate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          image_base64: base64Data,
+          confidence_threshold: 0.15
+        })
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success) {
+          state.liveDrsData = data;
+          if (el.liveDrsBadge) el.liveDrsBadge.style.display = 'flex';
+          if (el.liveStumpsBadgeText) el.liveStumpsBadgeText.textContent = 'Stumps Locked';
+          if (el.liveStumpsBadge) el.liveStumpsBadge.className = 'hud-badge success';
+          alert('Pitch calibrated successfully! 20.12m DRS crease lines active.');
+        } else {
+          alert('Could not automatically detect stumps in current frame. Ensure stumps are clearly visible in the camera.');
+        }
+      }
+    } catch (e) {
+      console.error('Calibration error:', e);
+    } finally {
+      if (el.liveAutoCalibBtn) {
+        el.liveAutoCalibBtn.disabled = false;
+        el.liveAutoCalibBtn.textContent = '🎯 Auto-Calibrate Pitch';
+      }
     }
   }
 

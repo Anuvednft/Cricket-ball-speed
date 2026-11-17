@@ -41,13 +41,17 @@ class FrameDecoder:
             return None
         return frame
 
-    def iter_frames(self, start_frame: int = 0, end_frame: Optional[int] = None) -> Generator[Tuple[int, float, np.ndarray], None, None]:
+    def iter_frames(
+        self, start_frame: int = 0, end_frame: Optional[int] = None, step: int = 1
+    ) -> Generator[Tuple[int, float, np.ndarray], None, None]:
         """
         Yields (frame_idx, timestamp_seconds, frame_bgr) sequentially.
+        Supports frame decimation via step to accelerate CPU inference.
         """
         self._cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
         current_idx = start_frame
         max_idx = end_frame if end_frame is not None else self.total_frames
+        stride = max(1, int(step))
 
         while current_idx < max_idx:
             pts_msec = self._cap.get(cv2.CAP_PROP_POS_MSEC)
@@ -58,6 +62,13 @@ class FrameDecoder:
             ts_sec = self.ts_manager.add_timestamp(current_idx, pts_msec)
             yield current_idx, ts_sec, frame
             current_idx += 1
+
+            if stride > 1:
+                for _ in range(stride - 1):
+                    if current_idx >= max_idx:
+                        break
+                    self._cap.grab()
+                    current_idx += 1
 
     def release(self):
         """Releases the video capture resource."""
