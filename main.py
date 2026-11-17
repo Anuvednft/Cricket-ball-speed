@@ -107,13 +107,18 @@ def main():
         print("CRICKET BOWLING SPEED MEASUREMENT SUMMARY")
         print("=" * 65)
         print(f"Status:             {res.get('status')}")
-        if res.get("status") == "MEASURED":
-            print(f"Release Speed:      {res.get('release_speed_kmh'):.1f} km/h (+- {res.get('uncertainty_kmh'):.1f} km/h)")
+        if res.get("status") in ("MEASURED", "ESTIMATED"):
+            spd = res.get('release_speed_kmh')
+            unc = res.get('uncertainty_kmh')
+            unc_str = f" (+- {unc:.1f} km/h)" if unc is not None else ""
+            spd_str = f"{spd:.1f} km/h" if spd is not None else "N/A"
+            print(f"Release Speed:      {spd_str}{unc_str} [{res.get('status')}]")
             if res.get("c1_c2_speed_kmh"):
                 print(f"C1-C2 Avg Speed:    {res.get('c1_c2_speed_kmh'):.1f} km/h")
-            print(f"Quality Score:      {res.get('qc_score'):.0f} / 100")
-        else:
-            print(f"Rejection Reason:   {res.get('rejection_reason')}")
+            if res.get("qc_score") is not None:
+                print(f"Quality Score:      {res.get('qc_score'):.0f} / 100")
+        if res.get("rejection_reason"):
+            print(f"Notes / Reasons:    {res.get('rejection_reason')}")
 
         print(f"JSON Report:        {res.get('json_report')}")
         print(f"Excel Report:       {res.get('excel_report')}")

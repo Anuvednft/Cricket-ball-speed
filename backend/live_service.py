@@ -5,6 +5,7 @@ automatic stump detection, 20.12m DRS line generation, ball tracking, and real-t
 """
 
 from typing import Dict, List, Optional, Tuple, Any, Callable
+import sys
 import time
 import math
 import logging
@@ -59,7 +60,6 @@ class LiveCameraService:
         self.speed_uncertainty_kmh: float = 0.0
         self.measurement_status: str = "NOT_MEASURED"
         self.rejection_reason: str = "Awaiting bowling delivery"
-        self.speed_uncertainty_kmh: float = 0.0
 
         self._lock = threading.Lock()
 

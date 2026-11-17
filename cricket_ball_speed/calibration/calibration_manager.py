@@ -80,6 +80,7 @@ class CalibrationResult:
             "reprojection_error_px": reproj_dict.get("mean_error_px", 0.0) if reproj_dict else None,
             "max_reprojection_error_px": reproj_dict.get("max_error_px", 0.0) if reproj_dict else None,
             "per_point_errors": reproj_dict.get("per_point_errors_px", {}) if reproj_dict else {},
+            "reprojection_report": reproj_dict,
             "camera_parameters": cam_dict,
             "drs_line": self.drs_line.to_dict() if self.drs_line else None,
             "pitch_corners": self.pitch_corners.to_dict() if self.pitch_corners else None,

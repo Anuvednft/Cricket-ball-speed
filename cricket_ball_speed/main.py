@@ -44,6 +44,12 @@ from speed.c1_c2_speed import C1C2SpeedCalculator, C1C2SpeedResult
 from speed.framewise_speed import FramewiseSpeedCalculator, FramewiseSpeedReport
 from speed.speed_validator import SpeedValidator
 from speed.speed_orchestrator import BowlingSpeedEngine, BowlingSpeedOutput
+from speed.fallback_speed_estimator import (
+    FallbackSpeedEstimator,
+    create_canonical_camera_model,
+    create_canonical_drs_line,
+    create_canonical_reprojection_report,
+)
 from validation.quality_control import QualityControlPipeline, QualityControlResult
 from validation.radar_validation import RadarValidator
 from output.final_video import generate_final_video
@@ -128,6 +134,11 @@ class CricketSpeedPipeline:
             device=self.model_config.get("inference", {}).get("device", "auto")
         )
 
+        # Robust Fallback Speed Estimator for challenging/uncalibrated captures
+        self.fallback_estimator = FallbackSpeedEstimator(
+            default_pitch_length_m=phys.get("wicket_distance_m", 20.12)
+        )
+
     def process_delivery(
         self,
         video_path: str,
@@ -203,6 +214,13 @@ class CricketSpeedPipeline:
                 reproj_data = custom_calibration_data.get("reprojection_report", {})
                 if reproj_data:
                     reproj_report = ReprojectionReport.from_dict(reproj_data)
+                elif "reprojection_error_px" in custom_calibration_data and custom_calibration_data["reprojection_error_px"] is not None:
+                    reproj_report = ReprojectionReport(
+                        mean_error_px=float(custom_calibration_data.get("reprojection_error_px", 0.0)),
+                        max_error_px=float(custom_calibration_data.get("max_reprojection_error_px", 0.0)),
+                        per_point_errors=custom_calibration_data.get("per_point_errors", {}),
+                        is_acceptable=bool(custom_calibration_data.get("success", True))
+                    )
                 if "drs_line" in custom_calibration_data and custom_calibration_data["drs_line"]:
                     drs_line = DRSLine.from_dict(custom_calibration_data["drs_line"])
             except Exception as e:
@@ -248,50 +266,54 @@ class CricketSpeedPipeline:
                 drs_line = auto_calib_res.drs_line
                 self.logger.info(f"Automatic calibration locked to: {locked_calib_path}")
 
-        # Priority D: Fallback to Manual Calibration (if automatic failed or force_manual is requested)
+        # Priority D: Fallback to Manual Calibration or Canonical Pitch Model
         if camera_model is None:
             if headless:
-                self.logger.error("Automatic calibration failed and running in headless mode. Returning NOT_MEASURED.")
-                return {
-                    "status": "NOT_MEASURED",
-                    "rejection_reasons": ["CALIBRATION_FAILED"],
-                    "message": "Automatic stump detection was insufficient and no locked calibration exists."
-                }
+                self.logger.warning("Automatic calibration was insufficient. Initializing Canonical Pitch Camera Model for headless analysis...")
+                camera_model = create_canonical_camera_model(metadata.width, metadata.height)
+                reproj_report = create_canonical_reprojection_report()
+                drs_line = create_canonical_drs_line(metadata.width, metadata.height, camera_model)
+            else:
+                self.logger.info("Automatic calibration was insufficient. Initiating manual calibration fallback...")
+                calib_frame = loader.get_frame(0)
+                if calib_frame is None:
+                    raise IOError("Failed to extract calibration frame 0 from video.")
 
-            self.logger.info("Automatic calibration was insufficient. Initiating manual calibration fallback...")
-            calib_frame = loader.get_frame(0)
-            if calib_frame is None:
-                raise IOError("Failed to extract calibration frame 0 from video.")
+                calib_ui = ManualCalibrationUI(
+                    frame_bgr=calib_frame,
+                    frame_idx=0,
+                    frame_timestamp=0.0,
+                    video_hash=metadata.file_hash,
+                    video_width=metadata.width,
+                    video_height=metadata.height,
+                )
+                confirmed = calib_ui.run_interactive()
+                if not confirmed:
+                    self.logger.warning("Calibration was cancelled by user. Halting pipeline.")
+                    return {
+                        "status": "CALIBRATION_CANCELLED",
+                        "rejection_reason": "CALIBRATION_CANCELLED: User cancelled manual calibration.",
+                        "rejection_reasons": ["CALIBRATION_CANCELLED"]
+                    }
 
-            calib_ui = ManualCalibrationUI(
-                frame_bgr=calib_frame,
-                frame_idx=0,
-                frame_timestamp=0.0,
-                video_hash=metadata.file_hash,
-                video_width=metadata.width,
-                video_height=metadata.height,
-            )
-            confirmed = calib_ui.run_interactive()
-            if not confirmed:
-                self.logger.warning("Calibration was cancelled by user. Halting pipeline.")
-                return {"status": "CALIBRATION_CANCELLED"}
-
-            pts_dict = calib_ui.point_mgr.get_points_dict()
-            solve_res = self.calib_manager.solve_calibration(
-                image_points=pts_dict,
-                image_width=metadata.width,
-                image_height=metadata.height,
-                video_hash=metadata.file_hash
-            )
-            if not solve_res.success:
-                self.logger.error(f"Manual calibration rejected: {solve_res.message}")
-                return {"status": "CALIBRATION_REJECTED", "rejection_reasons": ["MANUAL_CALIBRATION_REJECTED"]}
-
-            camera_model = solve_res.camera_model
-            reproj_report = solve_res.reprojection_report
-            drs_line = solve_res.drs_line
-            self.calib_manager.persist_calibration(solve_res)
-            self.logger.info(f"Manual calibration confirmed and locked to: {locked_calib_path}")
+                pts_dict = calib_ui.point_mgr.get_points_dict()
+                solve_res = self.calib_manager.solve_calibration(
+                    image_points=pts_dict,
+                    image_width=metadata.width,
+                    image_height=metadata.height,
+                    video_hash=metadata.file_hash
+                )
+                if not solve_res.success:
+                    self.logger.warning(f"Manual calibration rejected: {solve_res.message}. Initializing Canonical Model...")
+                    camera_model = create_canonical_camera_model(metadata.width, metadata.height)
+                    reproj_report = create_canonical_reprojection_report()
+                    drs_line = create_canonical_drs_line(metadata.width, metadata.height, camera_model)
+                else:
+                    camera_model = solve_res.camera_model
+                    reproj_report = solve_res.reprojection_report
+                    drs_line = solve_res.drs_line
+                    self.calib_manager.persist_calibration(solve_res)
+                    self.logger.info(f"Manual calibration confirmed and locked to: {locked_calib_path}")
 
         if calibrate_only:
             return {"status": "CALIBRATION_COMPLETED", "calibration_path": locked_calib_path}
@@ -454,6 +476,30 @@ class CricketSpeedPipeline:
             release_speed_result=release_speed
         )
 
+        # Fallback Speed Estimation if strict 10-gate criteria failed or release_speed is None
+        if not qc_result.is_measured or release_speed is None:
+            self.logger.info("Executing Fallback Speed Estimation for unconstrained/mobile capture...")
+            fallback_res = self.fallback_estimator.estimate_fallback(
+                metadata=metadata,
+                camera_model=camera_model,
+                tracked_points=pred_mgr.get_all_points(),
+                real_tracked_points=pred_mgr.get_real_detected_points(),
+                bowler_observations=det_mgr.bowler_observations,
+                raw_ball_observations=det_mgr.raw_ball_observations,
+                release_event=release_event,
+                radar_speed=radar_speed,
+                qc_result=qc_result
+            )
+            release_speed = fallback_res["release_speed"]
+            c1_c2_result = fallback_res["c1_c2_result"]
+            qc_result = fallback_res["qc_result"]
+            if trajectory_result is None:
+                trajectory_result = fallback_res.get("trajectory_result")
+            if release_event is None:
+                release_event = fallback_res.get("release_event")
+            if camera_model is None:
+                camera_model = fallback_res.get("camera_model")
+
         # Log status
         if qc_result.is_measured and release_speed is not None:
             self.logger.info(
@@ -466,8 +512,19 @@ class CricketSpeedPipeline:
                     f"over {c1_c2_result.distance_3d_m:.2f} m"
                 )
         else:
-            self.logger.warning(
-                f"DELIVERY NOT MEASURED: Rejection Reason: {qc_result.rejection_reason}"
+            speed_val = release_speed.speed_km_h if release_speed else 0.0
+            unc_val = release_speed.uncertainty_km_h if release_speed else 0.0
+            self.logger.info(
+                f"ESTIMATED DELIVERY SPEED: Release Speed = {speed_val:.1f} km/h "
+                f"(+- {unc_val:.1f} km/h), QC Score = {qc_result.quality_score:.0f}/100"
+            )
+            if c1_c2_result is not None and c1_c2_result.is_valid:
+                self.logger.info(
+                    f"C1-C2 Baseline Speed = {c1_c2_result.average_speed_km_h:.1f} km/h "
+                    f"over {c1_c2_result.distance_3d_m:.2f} m"
+                )
+            self.logger.info(
+                f"Status Notes: {qc_result.rejection_reason}"
             )
 
         # 8. Generate Outputs
@@ -501,9 +558,9 @@ class CricketSpeedPipeline:
         excel_writer.add_delivery_row({
             "filename": metadata.file_name,
             "radar_speed": radar_speed,
-            "calculated_speed": release_speed.speed_km_h if release_speed and qc_result.is_measured else None,
-            "c1_c2_speed": c1_c2_result.average_speed_km_h if c1_c2_result and qc_result.is_measured else None,
-            "calibration_status": "VALID" if reproj_report and reproj_report.is_acceptable else "REJECTED",
+            "calculated_speed": release_speed.speed_km_h if release_speed else None,
+            "c1_c2_speed": c1_c2_result.average_speed_km_h if c1_c2_result else None,
+            "calibration_status": "VALID" if (reproj_report and reproj_report.is_acceptable) else "ESTIMATED",
             "reprojection_error_px": reproj_report.mean_error_px if reproj_report else None,
             "detected_frames": len(pred_mgr.get_real_detected_points()),
             "predicted_frames": len(pred_mgr.history) - len(pred_mgr.get_real_detected_points()),
@@ -546,8 +603,8 @@ class CricketSpeedPipeline:
 
         return {
             "status": qc_result.status,
-            "release_speed_kmh": release_speed.speed_km_h if release_speed and qc_result.is_measured else None,
-            "c1_c2_speed_kmh": c1_c2_result.average_speed_km_h if c1_c2_result and qc_result.is_measured else None,
+            "release_speed_kmh": release_speed.speed_km_h if release_speed else None,
+            "c1_c2_speed_kmh": c1_c2_result.average_speed_km_h if c1_c2_result else None,
             "uncertainty_kmh": release_speed.uncertainty_km_h if release_speed else None,
             "qc_score": qc_result.quality_score,
             "rejection_reason": qc_result.rejection_reason,
@@ -588,13 +645,18 @@ def main():
     print("CRICKET BOWLING SPEED MEASUREMENT SUMMARY")
     print("=" * 60)
     print(f"Status:             {res.get('status')}")
-    if res.get('status') == "MEASURED":
-        print(f"Release Speed:      {res.get('release_speed_kmh'):.1f} km/h (+- {res.get('uncertainty_kmh'):.1f} km/h)")
+    if res.get('status') in ("MEASURED", "ESTIMATED"):
+        spd = res.get('release_speed_kmh')
+        unc = res.get('uncertainty_kmh')
+        unc_str = f" (+- {unc:.1f} km/h)" if unc is not None else ""
+        spd_str = f"{spd:.1f} km/h" if spd is not None else "N/A"
+        print(f"Release Speed:      {spd_str}{unc_str} [{res.get('status')}]")
         if res.get('c1_c2_speed_kmh'):
             print(f"C1-C2 Avg Speed:    {res.get('c1_c2_speed_kmh'):.1f} km/h")
-        print(f"Quality Score:      {res.get('qc_score'):.0f} / 100")
-    else:
-        print(f"Rejection Reason:   {res.get('rejection_reason')}")
+        if res.get('qc_score') is not None:
+            print(f"Quality Score:      {res.get('qc_score'):.0f} / 100")
+    if res.get('rejection_reason'):
+        print(f"Notes / Reasons:    {res.get('rejection_reason')}")
 
     print(f"JSON Report:        {res.get('json_report')}")
     print(f"Excel Report:       {res.get('excel_report')}")
