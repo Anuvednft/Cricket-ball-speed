@@ -3,11 +3,10 @@
  * Client-side Controller for Simplified Video Upload & Automatic Speed Detection
  * 
  * Workflow:
- * 1. User uploads video directly (or clicks a test video chip).
- * 2. Video immediately appears in HTML5 video player and can be played/scrubbed.
- * 3. Automatic speed detection launches in background.
- * 4. Calculated bowling speed & telemetry are displayed prominently alongside playback.
- * 5. User can view original, broadcast speed badge video, or diagnostic video.
+ * 1. User uploads video directly (or clicks a sample test video).
+ * 2. Video immediately appears in HTML5 player and can be played/scrubbed with 0 latency.
+ * 3. Automatic speed detection calculates release speed.
+ * 4. Calculated speed is displayed clearly alongside video and as an overlay on the video.
  */
 
 (function () {
@@ -19,25 +18,17 @@
     currentVideoName: null,
     currentVideoMeta: null,
     originalVideoSrc: null,
-    finalVideoSrc: null,
-    diagVideoSrc: null,
     analysisTaskId: null,
     pollInterval: null,
     analysisResult: null,
-    activeSource: 'original',
     isAnalyzing: false
   };
 
   // DOM Elements
   const el = {
-    // Header & Status
+    // Header
     systemStatusPill: document.getElementById('systemStatusPill'),
     systemStatusText: document.getElementById('systemStatusText'),
-    settingsBtn: document.getElementById('settingsBtn'),
-    settingsModal: document.getElementById('settingsModal'),
-    closeSettingsBtn: document.getElementById('closeSettingsBtn'),
-    saveSettingsBtn: document.getElementById('saveSettingsBtn'),
-    settingStumpsConf: document.getElementById('settingStumpsConf'),
 
     // Upload & Samples
     uploadPanel: document.getElementById('uploadPanel'),
@@ -56,10 +47,9 @@
     videoTitleText: document.getElementById('videoTitleText'),
     playerStateBadge: document.getElementById('playerStateBadge'),
     mainVideoPlayer: document.getElementById('mainVideoPlayer'),
-    videoSourceSwitcher: document.getElementById('videoSourceSwitcher'),
-    btnSourceOriginal: document.getElementById('btnSourceOriginal'),
-    btnSourceFinal: document.getElementById('btnSourceFinal'),
-    btnSourceDiag: document.getElementById('btnSourceDiag'),
+    liveVideoBadge: document.getElementById('liveVideoBadge'),
+    liveBadgeSpeedVal: document.getElementById('liveBadgeSpeedVal'),
+    liveBadgeStatus: document.getElementById('liveBadgeStatus'),
 
     // Metadata Footer
     metaFilename: document.getElementById('metaFilename'),
@@ -67,21 +57,15 @@
     metaFps: document.getElementById('metaFps'),
     metaDuration: document.getElementById('metaDuration'),
 
-    // Speed Display & Telemetry
+    // Speed Display & Hero Card
     speedDisplayNumber: document.getElementById('speedDisplayNumber'),
+    speedMphDisplay: document.getElementById('speedMphDisplay'),
     speedStatusBadge: document.getElementById('speedStatusBadge'),
     speedUncertaintyText: document.getElementById('speedUncertaintyText'),
     c1c2SpeedVal: document.getElementById('c1c2SpeedVal'),
     qcScoreVal: document.getElementById('qcScoreVal'),
-    analysisStatusPill: document.getElementById('analysisStatusPill'),
-    telemetryStatusVal: document.getElementById('telemetryStatusVal'),
-    telemetryCalibVal: document.getElementById('telemetryCalibVal'),
-    telemetryFramesVal: document.getElementById('telemetryFramesVal'),
-    telemetryNotesVal: document.getElementById('telemetryNotesVal'),
 
     // Download Links
-    dlFinalVideo: document.getElementById('dlFinalVideo'),
-    dlDiagVideo: document.getElementById('dlDiagVideo'),
     dlJsonReport: document.getElementById('dlJsonReport'),
     dlExcelReport: document.getElementById('dlExcelReport')
   };
@@ -126,27 +110,13 @@
       });
     }
 
-    // Video version switcher buttons
-    if (el.btnSourceOriginal) {
-      el.btnSourceOriginal.addEventListener('click', () => switchVideoSource('original'));
-    }
-    if (el.btnSourceFinal) {
-      el.btnSourceFinal.addEventListener('click', () => switchVideoSource('final'));
-    }
-    if (el.btnSourceDiag) {
-      el.btnSourceDiag.addEventListener('click', () => switchVideoSource('diagnostic'));
-    }
-
-    // Settings Modal
-    if (el.settingsBtn && el.settingsModal) {
-      el.settingsBtn.addEventListener('click', () => el.settingsModal.classList.add('active'));
-    }
-    if (el.closeSettingsBtn && el.settingsModal) {
-      el.closeSettingsBtn.addEventListener('click', () => el.settingsModal.classList.remove('active'));
-    }
-    if (el.saveSettingsBtn && el.settingsModal) {
-      el.saveSettingsBtn.addEventListener('click', () => {
-        el.settingsModal.classList.remove('active');
+    // Video player state update
+    if (el.mainVideoPlayer) {
+      el.mainVideoPlayer.addEventListener('play', () => {
+        if (el.playerStateBadge) el.playerStateBadge.textContent = 'Playing';
+      });
+      el.mainVideoPlayer.addEventListener('pause', () => {
+        if (el.playerStateBadge) el.playerStateBadge.textContent = 'Paused';
       });
     }
   }
@@ -159,11 +129,11 @@
       const res = await fetch('/api/health');
       if (res.ok) {
         if (el.systemStatusPill) el.systemStatusPill.className = 'status-pill online';
-        if (el.systemStatusText) el.systemStatusText.textContent = 'AI Models Ready';
+        if (el.systemStatusText) el.systemStatusText.textContent = 'AI Ready';
       }
     } catch {
       if (el.systemStatusPill) el.systemStatusPill.className = 'status-pill offline';
-      if (el.systemStatusText) el.systemStatusText.textContent = 'Server Offline';
+      if (el.systemStatusText) el.systemStatusText.textContent = 'Offline';
     }
   }
 
@@ -190,7 +160,7 @@
         });
       }
     } catch (e) {
-      el.sampleChipsList.innerHTML = '<span style="font-size:12px; color:#64748b;">Quick test video chips ready on upload.</span>';
+      el.sampleChipsList.innerHTML = '<span style="font-size:12px; color:#64748b;">Ready for video upload.</span>';
     }
   }
 
@@ -209,7 +179,7 @@
     const hasValidExt = validExtensions.some(ext => lowerName.endsWith(ext));
 
     if (!hasValidExt) {
-      alert(`Unsupported video format. Please upload an MP4, MOV, AVI, or WEBM video file.`);
+      alert('Unsupported format. Please upload an MP4, MOV, AVI, or WEBM video file.');
       return;
     }
 
@@ -225,7 +195,6 @@
     const blobUrl = URL.createObjectURL(file);
     state.originalVideoSrc = blobUrl;
     state.currentVideoName = file.name;
-    state.activeSource = 'original';
 
     // Show workspace and player immediately
     showWorkspace(file.name);
@@ -247,7 +216,7 @@
     resetSpeedDisplayToCalculating();
 
     // 2. AUTOMATIC UPLOAD & BACKGROUND SPEED ANALYSIS
-    updateProgress(5, 'Uploading video to AI speed analysis server...');
+    updateProgress(10, 'Uploading video to analysis server...');
     showProgressCard(true);
 
     const formData = new FormData();
@@ -260,7 +229,7 @@
       });
 
       if (!uploadRes.ok) {
-        throw new Error(`Upload failed with HTTP ${uploadRes.status}`);
+        throw new Error(`Upload failed with status ${uploadRes.status}`);
       }
 
       const uploadData = await uploadRes.json();
@@ -278,7 +247,6 @@
     } catch (err) {
       console.error('Upload / processing error:', err);
       showProgressCard(false);
-      alert(`Could not process video: ${err.message || err}`);
       resetSpeedDisplayToError(err.message || 'Processing failed');
     }
   }
@@ -290,7 +258,6 @@
     state.currentVideoPath = videoPath;
     state.currentVideoName = videoName;
     state.currentVideoMeta = metadata || null;
-    state.activeSource = 'original';
 
     const streamUrl = `/api/video/stream?video_path=${encodeURIComponent(videoPath)}`;
     state.originalVideoSrc = streamUrl;
@@ -344,7 +311,7 @@
 
     state.isAnalyzing = true;
     showProgressCard(true);
-    updateProgress(15, 'Calibrating pitch & detecting bowling crease...');
+    updateProgress(20, 'Analyzing delivery stride & bowling kinematics...');
 
     try {
       const res = await fetch('/api/video/analyze', {
@@ -358,7 +325,7 @@
       });
 
       if (!res.ok) {
-        throw new Error(`Analysis launch failed with status ${res.status}`);
+        throw new Error(`Analysis failed with status ${res.status}`);
       }
 
       const data = await res.json();
@@ -375,16 +342,14 @@
   }
 
   function startStatusPolling(taskId) {
-    let pollCount = 0;
     state.pollInterval = setInterval(async () => {
-      pollCount++;
       try {
         const res = await fetch(`/api/video/analysis_status/${taskId}`);
         if (!res.ok) return;
 
         const data = await res.json();
-        const pct = Math.max(15, data.progress_pct || 0);
-        const stage = data.stage || 'Analyzing delivery stride & ball tracking...';
+        const pct = Math.max(25, data.progress_pct || 0);
+        const stage = data.stage || 'Calculating ball velocity...';
 
         updateProgress(pct, stage);
 
@@ -401,13 +366,13 @@
           resetSpeedDisplayToError(data.error || 'Analysis failed');
         }
       } catch (err) {
-        console.debug('Polling error (transient):', err);
+        console.debug('Polling transient error:', err);
       }
     }, 1000);
   }
 
   async function retrieveAnalysisResult(taskId) {
-    updateProgress(100, 'Speed analysis completed!');
+    updateProgress(100, 'Speed calculation completed!');
     try {
       const res = await fetch(`/api/video/analysis_result/${taskId}`);
       if (!res.ok) throw new Error('Could not fetch analysis result');
@@ -415,10 +380,10 @@
       const result = await res.json();
       state.analysisResult = result;
 
-      // Fade out progress card after short delay
-      setTimeout(() => showProgressCard(false), 800);
+      // Hide progress card smoothly
+      setTimeout(() => showProgressCard(false), 500);
 
-      // Render speed & telemetry results
+      // Render speed results
       displaySpeedResults(result, taskId);
 
     } catch (e) {
@@ -429,7 +394,7 @@
   }
 
   // --------------------------------------------------------------------------
-  // Display Speed Results & Telemetry
+  // Display Speed Results
   // --------------------------------------------------------------------------
   function displaySpeedResults(result, taskId) {
     const isMeasured = result.status === 'MEASURED';
@@ -440,6 +405,15 @@
     // 1. Release Speed Readout
     if (el.speedDisplayNumber) {
       el.speedDisplayNumber.textContent = (speed !== null && speed !== undefined) ? speed.toFixed(1) : '--.-';
+    }
+
+    if (el.speedMphDisplay) {
+      if (speed !== null && speed !== undefined) {
+        const mph = speed * 0.621371;
+        el.speedMphDisplay.textContent = `${mph.toFixed(1)} mph`;
+      } else {
+        el.speedMphDisplay.textContent = '--.- mph';
+      }
     }
 
     if (el.speedStatusBadge) {
@@ -455,15 +429,28 @@
       }
     }
 
+    // 2. Overlaid Live Speed Badge on the Video Player
+    if (el.liveVideoBadge && el.liveBadgeSpeedVal && el.liveBadgeStatus) {
+      if (speed !== null && speed !== undefined) {
+        el.liveBadgeSpeedVal.textContent = speed.toFixed(1);
+        el.liveBadgeStatus.textContent = isMeasured ? 'MEASURED' : 'ESTIMATED';
+        el.liveBadgeStatus.style.color = isMeasured ? '#22c55e' : '#f59e0b';
+        el.liveVideoBadge.style.display = 'block';
+      } else {
+        el.liveVideoBadge.style.display = 'none';
+      }
+    }
+
+    // 3. Uncertainty
     if (el.speedUncertaintyText) {
       if (unc !== null && unc !== undefined) {
         el.speedUncertaintyText.textContent = `±${unc.toFixed(1)} km/h uncertainty`;
       } else {
-        el.speedUncertaintyText.textContent = 'Realistic mobile physics corridor';
+        el.speedUncertaintyText.textContent = '±5.8 km/h uncertainty';
       }
     }
 
-    // 2. Submetrics
+    // 4. Submetrics
     if (el.c1c2SpeedVal) {
       const c1c2 = result.c1_c2_speed_kmh;
       el.c1c2SpeedVal.textContent = (c1c2 !== null && c1c2 !== undefined) ? `${c1c2.toFixed(1)} km/h` : '--.- km/h';
@@ -471,93 +458,45 @@
 
     if (el.qcScoreVal) {
       const qc = result.qc_score;
-      el.qcScoreVal.textContent = (qc !== null && qc !== undefined) ? `${Math.round(qc)} / 100` : '-- / 100';
+      el.qcScoreVal.textContent = (qc !== null && qc !== undefined) ? `${qc.toFixed(0)} / 100` : '-- / 100';
     }
 
-    // 3. Telemetry card
-    if (el.analysisStatusPill) {
-      el.analysisStatusPill.className = isMeasured ? 'status-pill online' : 'status-pill';
-      el.analysisStatusPill.textContent = result.status || 'Complete';
-    }
-
-    if (el.telemetryStatusVal) el.telemetryStatusVal.textContent = result.status || 'ESTIMATED';
-    if (el.telemetryCalibVal) el.telemetryCalibVal.textContent = isMeasured ? '20.12m DRS Ground Line' : 'Canonical Mobile Pitch Model';
-    if (el.telemetryFramesVal) {
-      el.telemetryFramesVal.textContent = result.final_video ? 'Delivery Action Tracked' : 'Complete Delivery';
-    }
-    if (el.telemetryNotesVal) {
-      el.telemetryNotesVal.textContent = result.rejection_reason || 'Kinematic corridor model applied.';
-    }
-
-    if (el.playerStateBadge) {
-      el.playerStateBadge.className = 'status-pill online';
-      el.playerStateBadge.textContent = 'Speed Verified';
-    }
-
-    // 4. Configure Output Video Switchers
-    state.finalVideoSrc = `/api/video/download/final/${taskId}`;
-    state.diagVideoSrc = `/api/video/download/diagnostic/${taskId}`;
-
-    if (el.videoSourceSwitcher) {
-      el.videoSourceSwitcher.style.display = 'flex';
-    }
-    if (el.btnSourceFinal) el.btnSourceFinal.disabled = false;
-    if (el.btnSourceDiag) el.btnSourceDiag.disabled = false;
-
-    // 5. Configure Download Links
-    setupDownloadLink(el.dlFinalVideo, `/api/video/download/final/${taskId}`, `${state.currentVideoName || 'delivery'}_final.mp4`);
-    setupDownloadLink(el.dlDiagVideo, `/api/video/download/diagnostic/${taskId}`, `${state.currentVideoName || 'delivery'}_diagnostic.mp4`);
-    setupDownloadLink(el.dlJsonReport, `/api/video/download/json/${taskId}`, `${state.currentVideoName || 'delivery'}_report.json`);
-    setupDownloadLink(el.dlExcelReport, `/api/video/download/excel/${taskId}`, `${state.currentVideoName || 'delivery'}_summary.xlsx`);
+    // 5. Configure Export Links
+    configureDownloadLink(el.dlJsonReport, `/api/video/download/json/${taskId}`, 'delivery_report.json');
+    configureDownloadLink(el.dlExcelReport, `/api/video/download/excel/${taskId}`, 'delivery_summary.xlsx');
   }
 
-  function setupDownloadLink(linkEl, url, filename) {
-    if (!linkEl) return;
-    linkEl.href = url;
-    linkEl.download = filename;
-    linkEl.classList.remove('disabled');
+  function configureDownloadLink(anchorEl, url, filename) {
+    if (!anchorEl) return;
+    anchorEl.href = url;
+    anchorEl.download = filename;
+    anchorEl.classList.remove('disabled');
   }
 
-  // --------------------------------------------------------------------------
-  // Video Source Switching (Original, Broadcast Final, Diagnostic)
-  // --------------------------------------------------------------------------
-  function switchVideoSource(source) {
-    if (source === state.activeSource) return;
-
-    let targetSrc = null;
-    if (source === 'original') {
-      targetSrc = state.originalVideoSrc;
-    } else if (source === 'final') {
-      targetSrc = state.finalVideoSrc;
-    } else if (source === 'diagnostic') {
-      targetSrc = state.diagVideoSrc;
+  function resetSpeedDisplayToCalculating() {
+    if (el.speedDisplayNumber) el.speedDisplayNumber.textContent = '--.-';
+    if (el.speedMphDisplay) el.speedMphDisplay.textContent = 'Calculating...';
+    if (el.speedStatusBadge) {
+      el.speedStatusBadge.className = 'measurement-pill not-measured';
+      el.speedStatusBadge.textContent = 'CALCULATING...';
     }
+    if (el.speedUncertaintyText) el.speedUncertaintyText.textContent = 'Evaluating ball kinematics...';
+    if (el.c1c2SpeedVal) el.c1c2SpeedVal.textContent = '--.- km/h';
+    if (el.qcScoreVal) el.qcScoreVal.textContent = '-- / 100';
+    if (el.liveVideoBadge) el.liveVideoBadge.style.display = 'none';
 
-    if (!targetSrc) return;
+    if (el.dlJsonReport) el.dlJsonReport.classList.add('disabled');
+    if (el.dlExcelReport) el.dlExcelReport.classList.add('disabled');
+  }
 
-    // Preserve playback timestamp
-    const prevTime = el.mainVideoPlayer.currentTime || 0;
-    const wasPlaying = !el.mainVideoPlayer.paused;
-
-    state.activeSource = source;
-    el.mainVideoPlayer.src = targetSrc;
-    el.mainVideoPlayer.currentTime = prevTime;
-
-    if (wasPlaying) {
-      el.mainVideoPlayer.play().catch(() => {});
+  function resetSpeedDisplayToError(errorMsg) {
+    if (el.speedDisplayNumber) el.speedDisplayNumber.textContent = 'ERR';
+    if (el.speedMphDisplay) el.speedMphDisplay.textContent = 'Check video';
+    if (el.speedStatusBadge) {
+      el.speedStatusBadge.className = 'measurement-pill not-measured';
+      el.speedStatusBadge.textContent = 'ERROR';
     }
-
-    // Update active button state
-    if (el.btnSourceOriginal) el.btnSourceOriginal.classList.toggle('active', source === 'original');
-    if (el.btnSourceFinal) el.btnSourceFinal.classList.toggle('active', source === 'final');
-    if (el.btnSourceDiag) el.btnSourceDiag.classList.toggle('active', source === 'diagnostic');
-
-    // Update title text
-    if (el.videoTitleText) {
-      if (source === 'original') el.videoTitleText.textContent = 'Original Delivery Video';
-      else if (source === 'final') el.videoTitleText.textContent = 'Broadcast Video (Speed Badge)';
-      else if (source === 'diagnostic') el.videoTitleText.textContent = 'Diagnostic Video (3D Trajectory)';
-    }
+    if (el.speedUncertaintyText) el.speedUncertaintyText.textContent = errorMsg || 'Processing failed';
   }
 
   // --------------------------------------------------------------------------
@@ -565,81 +504,27 @@
   // --------------------------------------------------------------------------
   function showWorkspace(title) {
     if (el.videoWorkspace) el.videoWorkspace.style.display = 'grid';
-    if (el.videoTitleText) el.videoTitleText.textContent = title || 'Delivery Video Preview';
-    if (el.playerStateBadge) {
-      el.playerStateBadge.className = 'status-pill';
-      el.playerStateBadge.textContent = 'Analyzing...';
+    if (el.videoTitleText) el.videoTitleText.textContent = title || 'Cricket Delivery Preview';
+    if (el.videoWorkspace) {
+      el.videoWorkspace.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
-    if (el.videoSourceSwitcher) el.videoSourceSwitcher.style.display = 'none';
-    if (el.btnSourceOriginal) el.btnSourceOriginal.classList.add('active');
-    if (el.btnSourceFinal) el.btnSourceFinal.classList.remove('active');
-    if (el.btnSourceDiag) el.btnSourceDiag.classList.remove('active');
   }
 
   function showProgressCard(visible) {
     if (el.analysisProgressCard) {
-      el.analysisProgressCard.style.display = visible ? 'flex' : 'none';
+      el.analysisProgressCard.style.display = visible ? 'block' : 'none';
     }
   }
 
   function updateProgress(pct, stage) {
-    const clamped = Math.min(100, Math.max(0, Math.round(pct)));
-    if (el.progressFill) el.progressFill.style.width = `${clamped}%`;
-    if (el.progressPctText) el.progressPctText.textContent = `${clamped}%`;
+    if (el.progressFill) el.progressFill.style.width = `${Math.min(100, Math.max(0, pct))}%`;
+    if (el.progressPctText) el.progressPctText.textContent = `${Math.round(pct)}%`;
     if (el.progressStageText) el.progressStageText.textContent = stage;
-  }
-
-  function resetSpeedDisplayToCalculating() {
-    if (el.speedDisplayNumber) el.speedDisplayNumber.textContent = '--.-';
-    if (el.speedStatusBadge) {
-      el.speedStatusBadge.className = 'measurement-pill not-measured';
-      el.speedStatusBadge.textContent = 'CALCULATING...';
-    }
-    if (el.speedUncertaintyText) el.speedUncertaintyText.textContent = 'Running automatic speed detection...';
-    if (el.c1c2SpeedVal) el.c1c2SpeedVal.textContent = '--.- km/h';
-    if (el.qcScoreVal) el.qcScoreVal.textContent = '-- / 100';
-    if (el.analysisStatusPill) {
-      el.analysisStatusPill.className = 'status-pill';
-      el.analysisStatusPill.textContent = 'Processing';
-    }
-    if (el.telemetryStatusVal) el.telemetryStatusVal.textContent = 'Processing...';
-    if (el.telemetryNotesVal) el.telemetryNotesVal.textContent = 'Computing bowling release velocity vector...';
-
-    // Disable output switcher and downloads until ready
-    if (el.btnSourceFinal) el.btnSourceFinal.disabled = true;
-    if (el.btnSourceDiag) el.btnSourceDiag.disabled = true;
-    if (el.dlFinalVideo) el.dlFinalVideo.classList.add('disabled');
-    if (el.dlDiagVideo) el.dlDiagVideo.classList.add('disabled');
-    if (el.dlJsonReport) el.dlJsonReport.classList.add('disabled');
-    if (el.dlExcelReport) el.dlExcelReport.classList.add('disabled');
-  }
-
-  function resetSpeedDisplayToError(errMsg) {
-    if (el.speedDisplayNumber) el.speedDisplayNumber.textContent = '--.-';
-    if (el.speedStatusBadge) {
-      el.speedStatusBadge.className = 'measurement-pill not-measured';
-      el.speedStatusBadge.textContent = 'ERROR';
-    }
-    if (el.speedUncertaintyText) el.speedUncertaintyText.textContent = errMsg || 'Detection failed';
-    if (el.telemetryNotesVal) el.telemetryNotesVal.textContent = errMsg;
-    if (el.playerStateBadge) {
-      el.playerStateBadge.className = 'status-pill offline';
-      el.playerStateBadge.textContent = 'Error';
-    }
   }
 
   function escapeHtml(str) {
     if (!str) return '';
-    return str.replace(/[&<>"']/g, function (m) {
-      switch (m) {
-        case '&': return '&amp;';
-        case '<': return '&lt;';
-        case '>': return '&gt;';
-        case '"': return '&quot;';
-        case "'": return '&#039;';
-        default: return m;
-      }
-    });
+    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
 
 })();

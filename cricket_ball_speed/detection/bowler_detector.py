@@ -171,8 +171,16 @@ class BowlerDetector:
                 candidates.append(obs)
 
         elif self._framework == "ultralytics" and self._model is not None:
+            scale = 1.0
+            inf_img = frame_bgr
+            if max(h, w) > 640:
+                scale = 640.0 / max(h, w)
+                inf_w = int(round(w * scale))
+                inf_h = int(round(h * scale))
+                inf_img = cv2.resize(frame_bgr, (inf_w, inf_h), interpolation=cv2.INTER_AREA)
+
             results = self._model.predict(
-                frame_bgr,
+                inf_img,
                 conf=self.conf_thresh,
                 imgsz=self.input_size,
                 device=self.device if self.device != "auto" else None,
@@ -186,6 +194,11 @@ class BowlerDetector:
                             continue
                         conf = float(box.conf[0].item())
                         x1, y1, x2, y2 = box.xyxy[0].cpu().numpy().tolist()
+                        if scale != 1.0:
+                            x1 /= scale
+                            y1 /= scale
+                            x2 /= scale
+                            y2 /= scale
                         obs = BowlerObservation(
                             frame_index=frame_idx,
                             timestamp_sec=timestamp_sec,

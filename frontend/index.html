@@ -3,78 +3,63 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Cricket Bowling Speed Analyzer | Automatic Speed Detection</title>
+  <title>Cricket Bowling Speed Analyzer | Simplified Speed Detection</title>
   <link rel="stylesheet" href="/static/style.css">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='45' fill='%23ef4444'/><path d='M30 15 Q50 50 30 85 M70 15 Q50 50 70 85' stroke='white' stroke-width='4' fill='none'/></svg>">
 </head>
 <body>
 
-  <!-- Top Navigation Header -->
+  <!-- Clean Top Navigation Header -->
   <header class="top-header">
     <div class="brand-wrapper">
-      <div class="brand-icon-box">
-        🏏
-      </div>
+      <div class="brand-icon-box">🏏</div>
       <div class="brand-titles">
         <span class="brand-league">PRO CORPORATE LEAGUE • CRICKET SPEED QUEEN</span>
-        <span class="brand-sub">AI Bowling Speed & Trajectory Analytics</span>
+        <span class="brand-sub">CRICKET BOWLING SPEED DETECTION</span>
       </div>
     </div>
 
     <div class="header-status-group">
       <div id="systemStatusPill" class="status-pill online">
         <span class="status-dot"></span>
-        <span id="systemStatusText">AI Models Ready</span>
+        <span id="systemStatusText">AI Ready</span>
       </div>
-      <button id="settingsBtn" class="header-btn" title="System Settings">
-        ⚙ Settings
-      </button>
     </div>
   </header>
 
-  <!-- Main Container -->
+  <!-- Main Application Container -->
   <main class="main-container">
 
-    <!-- Hero Title Section -->
-    <section class="hero-section">
-      <h1 class="hero-title">CRICKET BOWLING <span class="highlight">SPEED ANALYZER</span></h1>
-      <p class="hero-subtitle">
-        Upload any bowling video to automatically preview, play, and calculate bowling release speed in km/h.
-      </p>
-    </section>
-
-    <!-- Upload Panel with Drag & Drop -->
+    <!-- Simple Upload & Quick Test Section -->
     <section class="upload-section">
       <div id="uploadPanel" class="upload-card-dashed">
-        <div class="upload-icon-circle">
-          ⬆
-        </div>
-        <h4>DRAG &amp; DROP CRICKET BOWLING VIDEO OR BROWSE</h4>
-        <p>Upload a cricket video file to instantly play and automatically compute bowling release speed.</p>
-        <span class="upload-specs">Supported Formats: MP4, MOV, AVI, WEBM • Up to 500 MB • 60+ FPS Recommended</span>
+        <div class="upload-icon-circle">⬆</div>
+        <h4>DRAG &amp; DROP CRICKET VIDEO OR CHOOSE FILE</h4>
+        <p>Upload a bowling video to instantly preview, play, and automatically detect speed.</p>
+        <span class="upload-specs">Supports MP4, MOV, AVI, WEBM • Up to 500 MB</span>
         <input type="file" id="videoFileInput" accept=".mp4,.mov,.avi,.webm" style="display: none;">
-        <div style="margin-top: 14px; display: flex; gap: 12px; justify-content: center; flex-wrap: wrap;">
-          <button id="browseVideoBtn" class="btn btn-primary" style="width: auto; padding: 10px 28px; font-size: 15px;">
-            📁 Select Video File
+        <div style="margin-top: 14px;">
+          <button id="browseVideoBtn" class="btn btn-primary" style="width: auto; padding: 12px 32px; font-size: 15px;">
+            📁 Select Bowling Video
           </button>
         </div>
       </div>
 
-      <!-- Quick Test Deliveries Bar -->
+      <!-- Quick Test Deliveries -->
       <div class="sample-videos-bar">
-        <span class="sample-videos-title">⚡ Quick Test Deliveries:</span>
+        <span class="sample-videos-title">⚡ Quick Test Videos:</span>
         <div id="sampleChipsList" style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
           <span style="font-size: 12px; color: #64748b;">Loading test deliveries...</span>
         </div>
       </div>
     </section>
 
-    <!-- Processing Status Banner (Visible while uploading or analyzing) -->
+    <!-- Sleek Progress Bar (Visible while calculating) -->
     <section id="analysisProgressCard" class="progress-card" style="display: none;">
       <div class="progress-header">
         <div style="display: flex; align-items: center; gap: 10px;">
           <span class="spinner-icon"></span>
-          <span id="progressStageText" class="progress-stage-name">Uploading video file...</span>
+          <span id="progressStageText" class="progress-stage-name">Processing bowling speed...</span>
         </div>
         <span id="progressPctText" class="progress-pct-readout">0%</span>
       </div>
@@ -83,39 +68,35 @@
       </div>
     </section>
 
-    <!-- Main Video Workspace (Revealed upon video upload/select) -->
+    <!-- Main Player & Live Speed Layout -->
     <section id="videoWorkspace" class="workspace-grid" style="display: none;">
 
-      <!-- Left Column: Video Player Viewport -->
+      <!-- Left Column: Video Player with Live Speed Badge Overlay -->
       <div class="viewport-card">
         <div class="viewport-header">
           <div style="display: flex; align-items: center; gap: 10px;">
             <h2 id="videoTitleText" class="viewport-title" style="margin: 0;">
               <span>Video Preview</span>
             </h2>
-            <span id="playerStateBadge" class="status-pill">Ready</span>
-          </div>
-
-          <!-- Video Version Switcher (Available once analysis finishes) -->
-          <div id="videoSourceSwitcher" class="view-switcher-group" style="display: none;">
-            <button id="btnSourceOriginal" class="switcher-btn active" title="Play original uploaded video">
-              🎬 Original
-            </button>
-            <button id="btnSourceFinal" class="switcher-btn" title="Play broadcast video with speed badge">
-              ⚡ Broadcast Video
-            </button>
-            <button id="btnSourceDiag" class="switcher-btn" title="Play diagnostic video with 3D trajectory">
-              🔍 Diagnostic Video
-            </button>
+            <span id="playerStateBadge" class="status-pill">Playing</span>
           </div>
         </div>
 
-        <!-- Video Player Wrapper -->
+        <!-- Video Player Wrapper with Broadcast Speed Overlay -->
         <div class="player-container">
           <video id="mainVideoPlayer" class="html5-video-player" controls playsinline preload="auto"></video>
+          
+          <!-- Broadcast-style live speed badge overlaid directly on the video -->
+          <div id="liveVideoBadge" class="live-video-speed-badge" style="display: none;">
+            <div class="live-badge-title">BOWLING SPEED</div>
+            <div class="live-badge-speed">
+              <span id="liveBadgeSpeedVal">--.-</span> <span class="live-badge-unit">KM/H</span>
+            </div>
+            <div id="liveBadgeStatus" class="live-badge-status">ESTIMATED</div>
+          </div>
         </div>
 
-        <!-- Delivery Metadata Footer -->
+        <!-- Clean Metadata Footer -->
         <div class="video-meta-footer">
           <div class="meta-item">
             <span class="meta-label">File:</span>
@@ -136,26 +117,33 @@
         </div>
       </div>
 
-      <!-- Right Column: Live Speed & Telemetry Dashboard -->
+      <!-- Right Column: Prominent Speed Card & Key Results -->
       <aside class="side-panel">
 
         <!-- Speed Hero Card -->
         <div class="speed-hero-card">
-          <span class="speed-title">Bowling Release Speed</span>
+          <span class="speed-title">⚡ Bowling Release Speed</span>
           <div class="speed-readout">
             <span id="speedDisplayNumber">--.-</span>
             <span class="speed-unit">KM/H</span>
           </div>
-          <div id="speedStatusBadge" class="measurement-pill not-measured">
-            CALCULATING...
+          <div id="speedMphDisplay" style="font-size: 14px; font-weight: 600; color: #94a3b8; margin-top: -4px;">
+            --.- mph
           </div>
+
+          <div style="margin-top: 10px;">
+            <div id="speedStatusBadge" class="measurement-pill not-measured">
+              CALCULATING...
+            </div>
+          </div>
+
           <div id="speedUncertaintyText" class="speed-uncertainty-text">
             ±0.0 km/h uncertainty
           </div>
 
-          <div class="speed-submetrics">
+          <div class="speed-submetrics" style="margin-top: 18px;">
             <div class="submetric-item">
-              <span class="submetric-label">C1-C2 Average</span>
+              <span class="submetric-label">Release-to-Crease</span>
               <span id="c1c2SpeedVal" class="submetric-val">--.- km/h</span>
             </div>
             <div class="submetric-item">
@@ -165,58 +153,25 @@
           </div>
         </div>
 
-        <!-- Analysis Telemetry Card -->
-        <div class="panel-card">
-          <div class="panel-header">
-            <h3 class="panel-title">Delivery Analysis Telemetry</h3>
-            <span id="analysisStatusPill" class="status-pill">Pending</span>
+        <!-- Clean Export Options -->
+        <div id="downloadsPanel" class="panel-card" style="padding: 18px;">
+          <div class="panel-header" style="margin-bottom: 12px;">
+            <h3 class="panel-title" style="font-size: 15px;">📥 Export Analysis</h3>
           </div>
-
-          <div class="telemetry-list">
-            <div class="telemetry-row">
-              <span class="telemetry-label">Measurement Status</span>
-              <span id="telemetryStatusVal" class="telemetry-val">--</span>
-            </div>
-            <div class="telemetry-row">
-              <span class="telemetry-label">Calibration Method</span>
-              <span id="telemetryCalibVal" class="telemetry-val">Auto Pitch / Canonical</span>
-            </div>
-            <div class="telemetry-row">
-              <span class="telemetry-label">Frames Tracked</span>
-              <span id="telemetryFramesVal" class="telemetry-val">--</span>
-            </div>
-            <div class="telemetry-row">
-              <span class="telemetry-label">Analysis Notes</span>
-              <span id="telemetryNotesVal" class="telemetry-val" style="font-size: 11px; max-width: 60%; text-align: right;">Speed calculation pending...</span>
-            </div>
-          </div>
-        </div>
-
-        <!-- Downloads & Export Center -->
-        <div id="downloadsPanel" class="panel-card">
-          <div class="panel-header">
-            <h3 class="panel-title">Export Results</h3>
-          </div>
-          <div class="downloads-grid">
-            <a id="dlFinalVideo" class="download-tile disabled" href="#" download>
-              <span class="download-icon">🎬</span>
-              <strong>Final Video</strong>
-              <small>MP4 with speed badge</small>
+          <div style="display: flex; gap: 10px; flex-direction: column;">
+            <a id="dlExcelReport" class="download-tile disabled" href="#" download style="padding: 12px; display: flex; align-items: center; gap: 12px;">
+              <span class="download-icon" style="font-size: 22px;">📊</span>
+              <div>
+                <strong style="display: block; font-size: 14px;">Download Excel Report</strong>
+                <small style="color: #64748b;">Complete telemetry summary (.xlsx)</small>
+              </div>
             </a>
-            <a id="dlDiagVideo" class="download-tile disabled" href="#" download>
-              <span class="download-icon">🔍</span>
-              <strong>Diagnostic Video</strong>
-              <small>MP4 with 3D trajectory</small>
-            </a>
-            <a id="dlJsonReport" class="download-tile disabled" href="#" download>
-              <span class="download-icon">📄</span>
-              <strong>JSON Report</strong>
-              <small>Complete telemetry data</small>
-            </a>
-            <a id="dlExcelReport" class="download-tile disabled" href="#" download>
-              <span class="download-icon">📊</span>
-              <strong>Excel Summary</strong>
-              <small>17-column benchmark XLSX</small>
+            <a id="dlJsonReport" class="download-tile disabled" href="#" download style="padding: 12px; display: flex; align-items: center; gap: 12px;">
+              <span class="download-icon" style="font-size: 22px;">📄</span>
+              <div>
+                <strong style="display: block; font-size: 14px;">Download JSON Report</strong>
+                <small style="color: #64748b;">Raw kinematics audit (.json)</small>
+              </div>
             </a>
           </div>
         </div>
@@ -225,39 +180,6 @@
     </section>
 
   </main>
-
-  <!-- Settings Modal -->
-  <div id="settingsModal" class="modal-backdrop">
-    <div class="modal-dialog">
-      <div class="modal-header">
-        <h3 class="panel-title">System &amp; Detection Settings</h3>
-        <button id="closeSettingsBtn" class="modal-close-btn">&times;</button>
-      </div>
-      <div class="telemetry-list">
-        <div class="telemetry-row">
-          <span class="telemetry-label">Stumps Detection Threshold:</span>
-          <input type="number" id="settingStumpsConf" min="0.05" max="0.95" step="0.05" value="0.20" style="padding: 4px; width: 80px;">
-        </div>
-        <div class="telemetry-row">
-          <span class="telemetry-label">Wicket Distance Constraint:</span>
-          <span class="telemetry-val">20.12 metres</span>
-        </div>
-        <div class="telemetry-row">
-          <span class="telemetry-label">Stump Height Constraint:</span>
-          <span class="telemetry-val">0.711 metres</span>
-        </div>
-        <div class="telemetry-row">
-          <span class="telemetry-label">Ball Diameter Constraint:</span>
-          <span class="telemetry-val">0.0715 metres</span>
-        </div>
-        <div class="telemetry-row">
-          <span class="telemetry-label">Inference Processing Device:</span>
-          <span id="settingDeviceVal" class="telemetry-val">Auto (GPU/CPU)</span>
-        </div>
-      </div>
-      <button id="saveSettingsBtn" class="btn btn-primary" style="margin-top: 14px;">Save Settings</button>
-    </div>
-  </div>
 
   <script src="/static/app.js"></script>
 </body>

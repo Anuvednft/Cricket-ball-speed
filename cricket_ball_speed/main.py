@@ -185,8 +185,8 @@ class CricketSpeedPipeline:
         max_rec = max(bowler_records, key=lambda x: x[1])
         peak_frame = max_rec[0]
 
-        window_before = int(round(fps * 1.2))
-        window_after = int(round(fps * 1.8))
+        window_before = int(round(fps * 0.7))
+        window_after = int(round(fps * 1.3))
 
         start_frame = max(0, peak_frame - window_before)
         end_frame = min(total, peak_frame + window_after)
@@ -474,6 +474,11 @@ class CricketSpeedPipeline:
 
             # Step Kalman track
             pred_mgr.step(frame_idx, ts, accepted_cands)
+
+            # Early exit if ball flight tracking has concluded
+            if pred_mgr.is_confirmed and not pred_mgr.is_active and len(pred_mgr.get_real_detected_points()) >= 6:
+                self.logger.info(f"Ball delivery trajectory tracking concluded at frame {frame_idx}.")
+                break
 
         # Check camera stability
         stability_rep = loader.get_stability_report()
