@@ -383,7 +383,7 @@ class VideoService:
                     headless=True,
                     radar_speed=radar_speed,
                     output_dir=output_dir,
-                    generate_videos=True,
+                    generate_videos=False,
                     progress_callback=on_progress
                 )
 

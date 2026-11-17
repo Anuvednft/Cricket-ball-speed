@@ -59,6 +59,48 @@ def compute_tiles(
     return tiles
 
 
+def compute_pitch_corridor_tiles(
+    img_w: int,
+    img_h: int,
+    corridor_x_min_ratio: float = 0.15,
+    corridor_x_max_ratio: float = 0.85,
+    num_vertical_splits: int = 2,
+    vertical_overlap_ratio: float = 0.25
+) -> List[Tuple[int, int, int, int]]:
+    """
+    Computes optimized overlapping tiles along the central pitch corridor.
+    In cricket broadcasting and mobile capture, the bowling pitch is aligned along
+    the central vertical axis (x in [0.15*W, 0.85*W]).
+    Slices the corridor vertically into release and crease zones.
+    Reduces tile count from 32-40 tiles down to 2 tiles while maximizing ball resolution.
+    """
+    x1 = int(round(img_w * max(0.0, corridor_x_min_ratio)))
+    x2 = int(round(img_w * min(1.0, corridor_x_max_ratio)))
+    if x2 <= x1:
+        x1, x2 = 0, img_w
+
+    if num_vertical_splits <= 1:
+        return [(x1, 0, x2, img_h)]
+
+    slice_h = int(round(img_h * (1.0 / (num_vertical_splits - (num_vertical_splits - 1) * vertical_overlap_ratio))))
+    slice_h = max(slice_h, 320)
+    stride_y = int(round(slice_h * (1.0 - vertical_overlap_ratio)))
+
+    tiles: List[Tuple[int, int, int, int]] = []
+    y1 = 0
+    for _ in range(num_vertical_splits):
+        y2 = min(img_h, y1 + slice_h)
+        if y2 - y1 < slice_h and y1 > 0:
+            y1 = max(0, img_h - slice_h)
+            y2 = img_h
+        tiles.append((x1, int(y1), x2, int(y2)))
+        if y2 >= img_h:
+            break
+        y1 += stride_y
+
+    return tiles
+
+
 def restore_tile_coordinates(
     crop_bbox: List[float],
     tile_x1: float,
@@ -194,7 +236,8 @@ class TiledInferenceEngine:
         overlap_y: float = 0.20,
         upscale_factor: float = 1.0,
         nms_iou_threshold: float = 0.35,
-        min_confidence: float = 0.12
+        min_confidence: float = 0.12,
+        use_pitch_corridor: bool = False
     ):
         self.tile_w = tile_width
         self.tile_h = tile_height
@@ -203,9 +246,12 @@ class TiledInferenceEngine:
         self.upscale_factor = max(1.0, float(upscale_factor))
         self.nms_iou = nms_iou_threshold
         self.min_conf = min_confidence
+        self.use_pitch_corridor = use_pitch_corridor
 
     def get_tiles(self, img_w: int, img_h: int) -> List[Tuple[int, int, int, int]]:
         """Returns tile bounding boxes for the given image dimensions."""
+        if self.use_pitch_corridor:
+            return compute_pitch_corridor_tiles(img_w, img_h)
         return compute_tiles(img_w, img_h, self.tile_w, self.tile_h, self.overlap_x, self.overlap_y)
 
     def extract_and_prepare_tile(
@@ -214,14 +260,22 @@ class TiledInferenceEngine:
         tile_coords: Tuple[int, int, int, int]
     ) -> Tuple[np.ndarray, float]:
         """
-        Extracts tile crop and applies optional upscaling.
+        Extracts tile crop and applies optional upscaling or downscaling.
         Returns: (processed_tile_crop, active_upscale_factor)
         """
         tx1, ty1, tx2, ty2 = tile_coords
         crop = frame_bgr[ty1:ty2, tx1:tx2]
+        h, w = crop.shape[:2]
+
+        # For large crops, downscale to max 960px to accelerate neural inference
+        if max(h, w) > 960:
+            scale = 960.0 / max(h, w)
+            new_w = int(round(w * scale))
+            new_h = int(round(h * scale))
+            downscaled = cv2.resize(crop, (new_w, new_h), interpolation=cv2.INTER_AREA)
+            return downscaled, scale
 
         if self.upscale_factor > 1.001:
-            h, w = crop.shape[:2]
             new_w = int(round(w * self.upscale_factor))
             new_h = int(round(h * self.upscale_factor))
             upscaled = cv2.resize(crop, (new_w, new_h), interpolation=cv2.INTER_CUBIC)

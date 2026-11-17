@@ -7,8 +7,14 @@ import argparse
 import os
 import sys
 import logging
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Tuple
 import yaml
+import cv2
+import torch
+
+# Multi-threading optimization for CPU inference
+torch.set_num_threads(8)
+cv2.setNumThreads(4)
 
 # Ensure current module directory is in python path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -139,13 +145,60 @@ class CricketSpeedPipeline:
             default_pitch_length_m=phys.get("wicket_distance_m", 20.12)
         )
 
+    def locate_delivery_window(self, loader: VideoLoader, bowler_det: BowlerDetector) -> Tuple[int, int]:
+        """
+        Fast temporal pre-scan to locate bowler delivery stride and active ball flight.
+        Skips dead walk-up time and celebration frames, focusing dense tracking on the
+        active delivery window (~150-180 frames).
+        """
+        total = loader.metadata.total_frames
+        fps = loader.metadata.fps
+        if total <= 250:
+            return 0, total
+
+        stride = max(6, int(round(fps * 0.15)))
+        bowler_records = []
+
+        cap = cv2.VideoCapture(loader.video_path)
+        idx = 0
+        while True:
+            if idx % stride == 0:
+                ret, frame = cap.read()
+                if not ret:
+                    break
+                h, w = frame.shape[:2]
+                scale = 640.0 / max(w, h)
+                small = cv2.resize(frame, (int(w * scale), int(h * scale)))
+                obs = bowler_det.detect(small, idx, idx / fps)
+                if obs:
+                    orig_area = (obs.width / scale) * (obs.height / scale)
+                    bowler_records.append((idx, orig_area, obs.confidence))
+            else:
+                if not cap.grab():
+                    break
+            idx += 1
+        cap.release()
+
+        if not bowler_records:
+            return 0, total
+
+        max_rec = max(bowler_records, key=lambda x: x[1])
+        peak_frame = max_rec[0]
+
+        window_before = int(round(fps * 0.7))
+        window_after = int(round(fps * 1.3))
+
+        start_frame = max(0, peak_frame - window_before)
+        end_frame = min(total, peak_frame + window_after)
+        return start_frame, end_frame
+
     def process_delivery(
         self,
         video_path: str,
         calibration_path: Optional[str] = None,
         custom_calibration_data: Optional[Dict[str, Any]] = None,
         calibrate_only: bool = False,
-        headless: bool = False,
+        headless: bool = True,
         force_manual: bool = False,
         radar_speed: Optional[float] = None,
         output_dir: Optional[str] = None,
@@ -379,7 +432,8 @@ class CricketSpeedPipeline:
         det_mgr = DetectionManager(
             ball_detector=ball_det,
             bowler_detector=bowler_det,
-            stumps_detector=stumps_det
+            stumps_detector=stumps_det,
+            bowler_interval=2
         )
 
         refiner = BoundingBoxRefiner()
@@ -389,13 +443,20 @@ class CricketSpeedPipeline:
             max_consecutive_predictions=self.settings.get("tracking", {}).get("max_consecutive_predictions", 3)
         )
 
+        # 3.5 Delivery Action Temporal Windowing
+        start_frame, end_frame = self.locate_delivery_window(loader, bowler_det)
+        self.logger.info(
+            f"Targeting active delivery window: frames {start_frame}..{end_frame} "
+            f"({end_frame - start_frame} frames out of {metadata.total_frames})"
+        )
+
         # 4. Sequential Detection and Tracking Pass
-        self.logger.info("Executing detection and temporal tracking pass across video frames...")
-        tot_f = max(1, metadata.total_frames)
-        for frame_idx, ts, frame_bgr in loader.iter_frames():
-            if progress_callback and (frame_idx % 4 == 0 or frame_idx == tot_f - 1):
-                p_pct = 25.0 + 45.0 * (frame_idx / tot_f)
-                progress_callback(p_pct, f"Tracking ball & bowler (frame {frame_idx + 1}/{tot_f})")
+        self.logger.info("Executing detection and temporal tracking pass across delivery frames...")
+        tot_f = max(1, end_frame - start_frame)
+        for frame_idx, ts, frame_bgr in loader.iter_frames(start_frame=start_frame, end_frame=end_frame):
+            if progress_callback and ((frame_idx - start_frame) % 4 == 0 or frame_idx == end_frame - 1):
+                p_pct = 25.0 + 45.0 * ((frame_idx - start_frame) / tot_f)
+                progress_callback(p_pct, f"Tracking ball & bowler (frame {frame_idx + 1}/{end_frame})")
 
             det_res = det_mgr.process_frame(frame_bgr, frame_idx, ts)
             raw_cands = det_res["ball_candidates"]
@@ -413,6 +474,11 @@ class CricketSpeedPipeline:
 
             # Step Kalman track
             pred_mgr.step(frame_idx, ts, accepted_cands)
+
+            # Early exit if ball flight tracking has concluded
+            if pred_mgr.is_confirmed and not pred_mgr.is_active and len(pred_mgr.get_real_detected_points()) >= 6:
+                self.logger.info(f"Ball delivery trajectory tracking concluded at frame {frame_idx}.")
+                break
 
         # Check camera stability
         stability_rep = loader.get_stability_report()
@@ -622,7 +688,8 @@ def main():
     parser.add_argument("--calibrate-only", action="store_true", help="Launch calibration UI, save calibration, then exit")
     parser.add_argument("--config-dir", type=str, default="config", help="Path to configuration directory")
     parser.add_argument("--output-dir", type=str, default="storage/results", help="Directory for output files")
-    parser.add_argument("--headless", action="store_true", help="Run without UI prompts (requires existing calibration)")
+    parser.add_argument("--headless", action="store_true", default=True, help="Run without UI prompts (default: True)")
+    parser.add_argument("--interactive", action="store_true", help="Launch interactive manual calibration GUI if auto-calibration fails")
     parser.add_argument("--force-manual", action="store_true", help="Bypass automatic stump calibration and force interactive manual 8-point landmark selection")
     parser.add_argument("--radar-speed", type=float, default=None, help="Independent radar gun speed for benchmark comparison")
     parser.add_argument("--no-video-output", action="store_true", help="Skip rendering output MP4 videos")
@@ -634,7 +701,7 @@ def main():
         video_path=args.video,
         calibration_path=args.calibration,
         calibrate_only=args.calibrate_only,
-        headless=args.headless,
+        headless=not args.interactive,
         force_manual=args.force_manual,
         radar_speed=args.radar_speed,
         output_dir=args.output_dir,

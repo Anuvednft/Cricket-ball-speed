@@ -36,13 +36,16 @@ class DetectionManager:
         bowler_detector: Optional[BowlerDetector] = None,
         stumps_detector: Optional[StumpsDetector] = None,
         pitch_detector: Optional[PitchDetector] = None,
-        stumps_interval: int = 10
+        stumps_interval: int = 10,
+        bowler_interval: int = 1
     ):
         self.ball_detector = ball_detector
         self.bowler_detector = bowler_detector
         self.stumps_detector = stumps_detector
         self.pitch_detector = pitch_detector
         self.stumps_interval = stumps_interval
+        self.bowler_interval = max(1, bowler_interval)
+        self._last_bowler: Optional[BowlerObservation] = None
 
         # Structured historical stores
         self.raw_ball_observations: Dict[int, List[BallObservation]] = {}
@@ -85,7 +88,12 @@ class DetectionManager:
         # 2. Bowler candidate
         bowler_cand: Optional[BowlerObservation] = None
         if self.bowler_detector is not None:
-            bowler_cand = self.bowler_detector.detect(frame_bgr, frame_idx, timestamp_sec)
+            if self.bowler_interval <= 1 or (frame_idx % self.bowler_interval == 0) or (self._last_bowler is None):
+                bowler_cand = self.bowler_detector.detect(frame_bgr, frame_idx, timestamp_sec)
+                self._last_bowler = bowler_cand
+            else:
+                bowler_cand = self._last_bowler
+
             if bowler_cand is not None:
                 # Enforce boundary: never hand landmark
                 assert bowler_cand.is_hand_landmark is False, (

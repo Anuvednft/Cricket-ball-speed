@@ -224,10 +224,18 @@ def generate_diagnostic_video(
     if not cap.isOpened():
         raise IOError(f"Could not open input video: {input_video_path}")
 
-    w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    orig_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    orig_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     in_fps = float(cap.get(cv2.CAP_PROP_FPS))
     out_fps = in_fps if in_fps > 0 else fps
+
+    # Standardize ultra-high-res 4K videos (>1920px) to 1080p for web compatibility and fast rendering
+    if max(orig_w, orig_h) > 1920:
+        scale = 1920.0 / max(orig_w, orig_h)
+        w = int(round(orig_w * scale))
+        h = int(round(orig_h * scale))
+    else:
+        w, h = orig_w, orig_h
 
     writer = None
     codecs = ["mp4v"] if sys.platform == "win32" else ["avc1", "mp4v"]
@@ -369,6 +377,8 @@ def generate_diagnostic_video(
                 fitted_curve_pts=fitted_curve_pts,
                 hud_info=hud_info
             )
+            if rendered.shape[1] != w or rendered.shape[0] != h:
+                rendered = cv2.resize(rendered, (w, h), interpolation=cv2.INTER_AREA)
             writer.write(rendered)
             frame_idx += 1
     finally:
