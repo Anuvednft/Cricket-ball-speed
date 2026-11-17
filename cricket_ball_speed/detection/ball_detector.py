@@ -75,7 +75,7 @@ class BallDetector:
         self.last_raw_candidates: List[BallObservation] = []
         self._injected_detections: Dict[int, List[BallObservation]] = {}
 
-        # Tiled engine
+        # Tiled engine with pitch corridor optimization
         self.tiled_engine = TiledInferenceEngine(
             tile_width=self.tile_w,
             tile_height=self.tile_h,
@@ -83,7 +83,8 @@ class BallDetector:
             overlap_y=self.tile_overlap,
             upscale_factor=self.upscale_factor,
             nms_iou_threshold=self.nms_iou,
-            min_confidence=self.min_candidate_conf
+            min_confidence=self.min_candidate_conf,
+            use_pitch_corridor=True
         )
 
         self._load_model()
@@ -187,24 +188,30 @@ class BallDetector:
         raw_candidates: List[BallObservation] = []
 
         # 1. Full-frame inference
-        full_dets = self._predict_raw(frame_bgr)
-        for xyxy, conf, cls_id in full_dets:
-            if self.target_classes and cls_id not in self.target_classes:
-                continue
-            if conf < self.min_candidate_conf:
-                continue
+        # In 4K video (>1920px), full frame downsamples by 6x into 640, shrinking ball below detection limit.
+        # Skip full frame on 4K if tiling is active to save ~350ms per frame.
+        skip_full_frame = bool(self.use_tiling and (w > 1920 or h > 1920))
+        if not skip_full_frame:
+            full_dets = self._predict_raw(frame_bgr)
+            for xyxy, conf, cls_id in full_dets:
+                if self.target_classes and cls_id not in self.target_classes:
+                    continue
+                if conf < self.min_candidate_conf:
+                    continue
 
-            obs = BallObservation.from_bbox(
-                frame_idx=frame_idx,
-                timestamp_sec=timestamp_sec,
-                bbox=xyxy,
-                confidence=conf,
-                detection_source="full_frame"
-            )
-            raw_candidates.append(obs)
+                obs = BallObservation.from_bbox(
+                    frame_idx=frame_idx,
+                    timestamp_sec=timestamp_sec,
+                    bbox=xyxy,
+                    confidence=conf,
+                    detection_source="full_frame"
+                )
+                raw_candidates.append(obs)
 
-        # 2. Overlapping tiled inference (for tiny distant balls)
-        if self.use_tiling and (w > self.tile_w or h > self.tile_h):
+        # 2. Overlapping pitch corridor tiled inference (for tiny distant balls)
+        # Skip tiling if full-frame inference already found a confident candidate to optimize speed
+        has_confident_ball = any(c.confidence >= 0.28 for c in raw_candidates)
+        if self.use_tiling and not has_confident_ball and (w > self.tile_w or h > self.tile_h):
             _, tile_raw = self.tiled_engine.process_tiled_frame(
                 frame_bgr=frame_bgr,
                 frame_idx=frame_idx,

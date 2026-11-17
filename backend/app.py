@@ -396,9 +396,10 @@ def list_sample_videos():
     """Discovers available video files in storage directories for instant one-click testing."""
     sample_files = []
     search_dirs = [
-        os.path.join(CBS_DIR, "storage", "temp"),
+        ROOT_DIR,
+        os.path.join(ROOT_DIR, "storage", "uploads"),
         os.path.join(CBS_DIR, "storage", "results"),
-        os.path.join(ROOT_DIR, "storage", "uploads")
+        os.path.join(CBS_DIR, "storage", "temp")
     ]
 
     seen_paths = set()
@@ -407,7 +408,7 @@ def list_sample_videos():
             for fname in os.listdir(sdir):
                 if fname.lower().endswith((".mp4", ".mov", ".avi", ".webm")):
                     fpath = os.path.join(sdir, fname)
-                    if fpath in seen_paths:
+                    if fpath in seen_paths or not os.path.isfile(fpath):
                         continue
                     seen_paths.add(fpath)
                     try:
@@ -460,12 +461,26 @@ def get_video_metadata_endpoint(video_path: str = Query(...)):
 @app.get("/api/video/stream")
 def stream_video(video_path: str = Query(...)):
     """Streams a video file for HTML5 video playback."""
-    if not os.path.isfile(video_path):
+    v_path = video_path
+    if not os.path.isabs(v_path):
+        for candidate in [
+            os.path.join(ROOT_DIR, v_path),
+            os.path.join(ROOT_DIR, "storage", "uploads", v_path),
+            os.path.join(ROOT_DIR, "storage", "results", v_path)
+        ]:
+            if os.path.isfile(candidate):
+                v_path = candidate
+                break
+
+    if not os.path.isfile(v_path):
         raise HTTPException(status_code=404, detail="Video file not found.")
 
+    ext = os.path.splitext(v_path)[1].lower()
+    media_type = "video/quicktime" if ext == ".mov" else ("video/webm" if ext == ".webm" else "video/mp4")
+
     return FileResponse(
-        video_path,
-        media_type="video/mp4",
+        v_path,
+        media_type=media_type,
         headers={"Accept-Ranges": "bytes"}
     )
 
@@ -544,14 +559,25 @@ def start_video_delivery_analysis(req: AnalyzeVideoRequest):
     Launches full delivery speed analysis in background.
     Returns task_id for progress polling.
     """
-    if not os.path.isfile(req.video_path):
+    v_path = req.video_path
+    if not os.path.isabs(v_path):
+        for candidate in [
+            os.path.join(ROOT_DIR, v_path),
+            os.path.join(ROOT_DIR, "storage", "uploads", v_path),
+            os.path.join(ROOT_DIR, "storage", "results", v_path)
+        ]:
+            if os.path.isfile(candidate):
+                v_path = candidate
+                break
+
+    if not os.path.isfile(v_path):
         raise HTTPException(status_code=404, detail=f"Video file not found at: {req.video_path}")
 
     # Use custom calibration if supplied, else active_calibration
     calib_to_use = req.custom_calibration or active_calibration
 
     task_id = video_service.start_video_analysis(
-        video_path=req.video_path,
+        video_path=v_path,
         custom_calibration=calib_to_use,
         radar_speed=req.radar_speed
     )

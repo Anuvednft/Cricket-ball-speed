@@ -120,10 +120,18 @@ def generate_final_video(
 
     writer = None
     try:
-        w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        orig_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        orig_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         in_fps = float(cap.get(cv2.CAP_PROP_FPS))
         out_fps = in_fps if in_fps > 0 else fps
+
+        # Standardize ultra-high-res 4K videos (>1920px) to 1080p for web compatibility and fast rendering
+        if max(orig_w, orig_h) > 1920:
+            scale = 1920.0 / max(orig_w, orig_h)
+            w = int(round(orig_w * scale))
+            h = int(round(orig_h * scale))
+        else:
+            w, h = orig_w, orig_h
 
         codecs = ["mp4v"] if sys.platform == "win32" else ["avc1", "mp4v"]
         for codec in codecs:
@@ -178,6 +186,8 @@ def generate_final_video(
             ret, frame = cap.read()
             if not ret or frame is None:
                 break
+            if frame.shape[1] != w or frame.shape[0] != h:
+                frame = cv2.resize(frame, (w, h), interpolation=cv2.INTER_AREA)
             rendered = renderer.render_badge(
                 frame, speed_str, time_str, is_measured=is_measured, status=status_text
             )
