@@ -14,6 +14,7 @@ Operates cleanly on either domain dataclasses or plain dictionary structures.
 
 from typing import List, Dict, Any, Optional, Tuple, Union
 import os
+import sys
 import cv2
 import numpy as np
 
@@ -163,7 +164,12 @@ class DiagnosticVideoRenderer:
         # Status & Quality Score
         status_str = hud_info.get("status", "NOT_MEASURED")
         score = hud_info.get("quality_score", 0.0)
-        status_col = (46, 204, 113) if status_str == "MEASURED" else (60, 60, 230)
+        if status_str == "MEASURED":
+            status_col = (46, 204, 113) # Green
+        elif status_str == "ESTIMATED":
+            status_col = (0, 185, 245)  # Gold / Amber
+        else:
+            status_col = (60, 60, 230)  # Red
         cv2.putText(overlay, f"STATUS: {status_str}  (QC Score: {score:.0f}/100)", (hx1 + 16, hy1 + 28), cv2.FONT_HERSHEY_DUPLEX, 0.52, status_col, 1, cv2.LINE_AA)
 
         # Speeds
@@ -186,10 +192,12 @@ class DiagnosticVideoRenderer:
         pred_cnt = hud_info.get("predicted_count", 0)
         cv2.putText(overlay, f"Observed Balls: {det_cnt} | Kalman Preds: {pred_cnt}", (hx1 + 16, hy1 + 152), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (160, 170, 180), 1, cv2.LINE_AA)
 
-        # Rejection reason if unmeasured
+        # Notes / Rejection reason if not strictly measured
         if status_str != "MEASURED":
             rej = hud_info.get("rejection_reason", "QC Gates Failed")
-            cv2.putText(overlay, f"REJ: {rej[:40]}", (hx1 + 16, hy1 + 184), cv2.FONT_HERSHEY_SIMPLEX, 0.38, (0, 140, 255), 1, cv2.LINE_AA)
+            tag_pfx = "EST: " if status_str == "ESTIMATED" else "REJ: "
+            tag_col = (0, 185, 245) if status_str == "ESTIMATED" else (0, 140, 255)
+            cv2.putText(overlay, f"{tag_pfx}{rej[:40]}", (hx1 + 16, hy1 + 184), cv2.FONT_HERSHEY_SIMPLEX, 0.38, tag_col, 1, cv2.LINE_AA)
 
         return overlay
 
@@ -221,8 +229,20 @@ def generate_diagnostic_video(
     in_fps = float(cap.get(cv2.CAP_PROP_FPS))
     out_fps = in_fps if in_fps > 0 else fps
 
-    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-    writer = cv2.VideoWriter(output_video_path, fourcc, out_fps, (w, h))
+    writer = None
+    codecs = ["mp4v"] if sys.platform == "win32" else ["avc1", "mp4v"]
+    for codec in codecs:
+        try:
+            fourcc = cv2.VideoWriter_fourcc(*codec)
+            test_writer = cv2.VideoWriter(output_video_path, fourcc, out_fps, (w, h))
+            if test_writer.isOpened():
+                writer = test_writer
+                break
+        except Exception:
+            continue
+    if writer is None or not writer.isOpened():
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        writer = cv2.VideoWriter(output_video_path, fourcc, out_fps, (w, h))
 
     raw_obs_map = raw_observations or {}
     points_list = tracked_points or []
@@ -275,11 +295,12 @@ def generate_diagnostic_video(
 
     rel_spd_str = "N/A"
     unc_str = "N/A"
-    if release_speed is not None and status_str == "MEASURED":
+    if release_speed is not None:
         s_val = getattr(release_speed, "speed_km_h", None) if not isinstance(release_speed, dict) else release_speed.get("speed_km_h")
         u_val = getattr(release_speed, "uncertainty_km_h", None) if not isinstance(release_speed, dict) else release_speed.get("uncertainty_km_h")
         if s_val is not None:
-            rel_spd_str = f"{s_val:.1f} km/h"
+            tag = "" if status_str == "MEASURED" else " (EST)"
+            rel_spd_str = f"{s_val:.1f} km/h{tag}"
         if u_val is not None:
             unc_str = f"+-{u_val:.1f} km/h"
 

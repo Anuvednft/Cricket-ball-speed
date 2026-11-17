@@ -219,10 +219,13 @@
             btn.addEventListener('click', () => loadVideoByPath(sv.path));
             elements.sampleChipsList.appendChild(btn);
           });
+        } else {
+          elements.sampleChipsList.innerHTML = '<span style="color: #64748b; font-size: 13px;">No sample videos found in storage. Upload a bowling video above to get started.</span>';
         }
       }
     } catch (e) {
       console.warn('Could not load sample videos:', e);
+      elements.sampleChipsList.innerHTML = '<span style="color: #64748b; font-size: 13px;">No sample videos found in storage. Upload a bowling video above to get started.</span>';
     }
   }
 
@@ -634,10 +637,27 @@
   function confirmLiveCalibration() {
     if (!state.liveLatestTelemetry) return;
     const det = state.liveLatestTelemetry.detection || state.liveLatestTelemetry;
+    let payload = state.activeCalibration;
+    if (!payload || !payload.camera_parameters) {
+      if (det.near_wicket && det.far_wicket) {
+        payload = {
+          image_points: {
+            near_base: det.near_wicket.base_center,
+            near_top: det.near_wicket.top_center,
+            far_base: det.far_wicket.base_center,
+            far_top: det.far_wicket.top_center
+          },
+          image_width: elements.liveCanvas.width || 1280,
+          image_height: elements.liveCanvas.height || 720
+        };
+      } else {
+        payload = det;
+      }
+    }
     fetch('/api/calibration/confirm', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(det)
+      body: JSON.stringify(payload)
     })
     .then(() => {
       elements.liveCalibPill.className = 'status-pill online';
@@ -808,6 +828,9 @@
         state.activeDetection = det;
         renderVideoFrameWithOverlays();
         updateVideoTelemetry(det);
+        if (det.near_wicket && det.far_wicket && det.drs_line && det.drs_line.is_valid && !state.activeCalibration) {
+          triggerVideoAutoCalibrate(true);
+        }
       }
     } catch (e) {
       renderVideoFrameWithOverlays();
@@ -1037,9 +1060,9 @@
   // ============================================================================
   // Video Calibration & Background Analysis
   // ============================================================================
-  async function triggerVideoAutoCalibrate() {
+  async function triggerVideoAutoCalibrate(quiet = false) {
     if (!state.activeDetection || !state.currentFrameImg) {
-      alert('Please load a video frame with visible wickets first.');
+      if (!quiet) alert('Please load a video frame with visible wickets first.');
       return;
     }
 
@@ -1074,17 +1097,22 @@
           elements.videoReprojVal.className = 'telemetry-val success';
           elements.confirmVideoCalibBtn.disabled = false;
           elements.startAnalysisBtn.disabled = false;
-          alert(`Auto Calibration Successful!\nReprojection RMSE: ${calib.reprojection_error_px.toFixed(2)}px\nLongitudinal DRS axis: 20.12m locked.`);
+          if (!quiet) {
+            alert(`Auto Calibration Successful!\nReprojection RMSE: ${calib.reprojection_error_px.toFixed(2)}px\nLongitudinal DRS axis: 20.12m locked.`);
+          }
         } else {
-          alert(`Calibration rejected: ${calib.message}`);
+          if (!quiet) alert(`Calibration rejected: ${calib.message}`);
         }
       }
     } catch (e) {
-      alert(`Calibration error: ${e}`);
+      if (!quiet) alert(`Calibration error: ${e}`);
     }
   }
 
   async function confirmVideoCalibration() {
+    if (!state.activeCalibration) {
+      await triggerVideoAutoCalibrate(true);
+    }
     if (!state.activeCalibration) return;
     try {
       const res = await fetch('/api/calibration/confirm', {
@@ -1107,6 +1135,11 @@
     if (!state.currentVideoPath) {
       alert('Please upload or select a video first.');
       return;
+    }
+
+    // Auto-calibrate if not yet performed
+    if (!state.activeCalibration && state.activeDetection && state.activeDetection.near_wicket && state.activeDetection.far_wicket) {
+      await triggerVideoAutoCalibrate(true);
     }
 
     elements.startAnalysisBtn.disabled = true;
@@ -1180,13 +1213,20 @@
       elements.startAnalysisBtn.disabled = false;
 
       const isMeasured = data.status === 'MEASURED';
-      elements.resultsMeasurementBadge.className = `measurement-pill ${isMeasured ? 'measured' : 'not-measured'}`;
+      const isEstimated = data.status === 'ESTIMATED';
+      let badgeClass = 'measurement-pill not-measured';
+      if (isMeasured) {
+        badgeClass = 'measurement-pill measured';
+      } else if (isEstimated) {
+        badgeClass = 'measurement-pill estimated';
+      }
+      elements.resultsMeasurementBadge.className = badgeClass;
       elements.resultsMeasurementBadge.textContent = data.status;
 
       elements.resultReleaseSpeed.textContent = data.release_speed_kmh ? data.release_speed_kmh.toFixed(1) : '--.-';
-      elements.resultUncertainty.textContent = data.uncertainty_kmh ? `±${data.uncertainty_kmh.toFixed(1)} km/h uncertainty` : 'Uncertainty unconstrained';
+      elements.resultUncertainty.textContent = data.uncertainty_kmh ? `±${data.uncertainty_kmh.toFixed(1)} km/h uncertainty` : (isEstimated ? '±4.5 km/h estimated' : 'Uncertainty unconstrained');
       elements.resultC1C2Speed.textContent = data.c1_c2_speed_kmh ? `${data.c1_c2_speed_kmh.toFixed(1)} km/h` : '--.- km/h';
-      elements.resultQcScore.textContent = `${data.qc_score || 0} / 100`;
+      elements.resultQcScore.textContent = `${(data.qc_score || 0).toFixed(0)} / 100`;
       elements.resultStatusVal.textContent = data.status;
       elements.resultRejectionVal.textContent = data.rejection_reason || 'None';
 

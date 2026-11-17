@@ -93,6 +93,7 @@ class ExcelReportWriter:
 
         final_status = row_data.get("final_status") or row_data.get("status") or ("MEASURED" if calc_speed is not None else "NOT_MEASURED")
         is_measured = (final_status == "MEASURED")
+        is_estimated = (final_status == "ESTIMATED")
 
         # Compute error metrics against radar ground truth if available
         diff = None
@@ -101,7 +102,7 @@ class ExcelReportWriter:
 
         benchmark_target = radar_speed if radar_speed is not None else ref_speed
 
-        if is_measured and calc_speed is not None and benchmark_target is not None:
+        if (is_measured or is_estimated) and calc_speed is not None and benchmark_target is not None:
             diff = round(float(calc_speed) - float(benchmark_target), 2)
             abs_err = round(abs(diff), 2)
             # Clearly defined meaning: Variance is the squared residual error (e_i^2) in km^2/h^2
@@ -114,13 +115,13 @@ class ExcelReportWriter:
         rel_conf = row_data.get("release_confidence")
         traj_rmse = row_data.get("trajectory_rmse_px") or row_data.get("trajectory_quality")
         speed_unc = row_data.get("speed_uncertainty_kmh") or row_data.get("speed_uncertainty")
-        rejection_reason = row_data.get("rejection_reason") or ("None (Passed QC)" if is_measured else "REJECTED")
+        rejection_reason = row_data.get("rejection_reason") or ("None (Passed QC)" if is_measured else ("ESTIMATED: Fallback" if is_estimated else "REJECTED"))
 
         values = [
             filename,
             round(float(ref_speed), 2) if ref_speed is not None else "N/A",
             round(float(radar_speed), 2) if radar_speed is not None else "N/A",
-            round(float(calc_speed), 2) if (calc_speed is not None and is_measured) else "NOT_MEASURED",
+            round(float(calc_speed), 2) if (calc_speed is not None and (is_measured or is_estimated)) else "NOT_MEASURED",
             round(float(c1c2_speed), 2) if c1c2_speed is not None else "N/A",
             diff if diff is not None else "N/A",
             abs_err if abs_err is not None else "N/A",
@@ -150,6 +151,9 @@ class ExcelReportWriter:
                 if val == "MEASURED":
                     cell.fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
                     cell.font = Font(name="Calibri", color="006100", bold=True)
+                elif val == "ESTIMATED":
+                    cell.fill = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid")
+                    cell.font = Font(name="Calibri", color="B25900", bold=True)
                 else:
                     cell.fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
                     cell.font = Font(name="Calibri", color="9C0006", bold=True)

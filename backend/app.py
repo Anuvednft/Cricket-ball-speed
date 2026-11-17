@@ -341,7 +341,24 @@ def get_current_calibration():
 def confirm_calibration(req: Dict[str, Any]):
     """Confirms and locks calibration for the current session or video."""
     global active_calibration
-    active_calibration = req
+    if "camera_parameters" in req:
+        active_calibration = req
+    elif active_calibration and "camera_parameters" in active_calibration:
+        # Preserve active camera parameters and merge metadata
+        active_calibration.update({k: v for k, v in req.items() if k != "camera_parameters"})
+    else:
+        # If neither has camera parameters, check if image_points are present to calibrate
+        img_pts = req.get("image_points")
+        if img_pts and len(img_pts) >= 4:
+            w = int(req.get("image_width", 1280))
+            h = int(req.get("image_height", 720))
+            res = engine.calibrate(image_points=img_pts, image_width=w, image_height=h)
+            if res.get("success"):
+                active_calibration = {**res, **req}
+            else:
+                active_calibration = req
+        else:
+            active_calibration = req
     return {"status": "confirmed", "message": "Calibration confirmed and locked."}
 
 

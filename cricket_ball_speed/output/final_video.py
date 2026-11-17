@@ -14,6 +14,7 @@ STRICT VISUAL CONSTRAINTS:
 from typing import Optional, Tuple, Dict, Any, Union
 import datetime
 import os
+import sys
 import cv2
 import numpy as np
 
@@ -50,11 +51,12 @@ class FinalVideoRenderer:
         frame: np.ndarray,
         speed_text: str,
         timestamp_str: str,
-        is_measured: bool = True
+        is_measured: bool = True,
+        status: str = "MEASURED"
     ) -> np.ndarray:
         """
         Overlays the clean broadcast speed badge in the upper-left area.
-        Contains strictly speed and date/time. Zero diagnostics.
+        Contains strictly speed, measurement status, and date/time.
         """
         h, w = frame.shape[:2]
         bx, by, bw, bh = self.compute_badge_rect(w, h)
@@ -64,24 +66,32 @@ class FinalVideoRenderer:
         overlay = out_frame.copy()
         cv2.rectangle(overlay, (bx, by), (bx + bw, by + bh), (18, 22, 28), -1)
 
-        # Left accent stripe: vivid green for MEASURED, deep coral for NOT MEASURED
-        stripe_color = (46, 204, 113) if is_measured else (70, 70, 230)
-        cv2.rectangle(overlay, (bx, by), (bx + 6, by + bh), stripe_color, -1)
+        # Left accent stripe: vivid green for MEASURED, gold/amber for ESTIMATED, coral for NOT_MEASURED
+        if is_measured or status == "MEASURED":
+            stripe_color = (46, 204, 113) # Green
+        elif status == "ESTIMATED":
+            stripe_color = (0, 185, 245)  # Gold / Amber
+        else:
+            stripe_color = (70, 70, 230)  # Coral
 
+        cv2.rectangle(overlay, (bx, by), (bx + 6, by + bh), stripe_color, -1)
         cv2.addWeighted(overlay, 0.85, out_frame, 0.15, 0, out_frame)
 
         # Subtle card border
         cv2.rectangle(out_frame, (bx, by), (bx + bw, by + bh), (60, 68, 76), 1)
 
-        # 1. Date and Time (Upper row of badge)
+        # 1. Date and Time + Status Pill (Upper row of badge)
+        status_tag = "" if (is_measured or status == "MEASURED") else f"  •  {status}"
+        header_text = f"{timestamp_str}{status_tag}"
         cv2.putText(
-            out_frame, timestamp_str, (bx + 16, by + int(bh * 0.30)),
+            out_frame, header_text, (bx + 16, by + int(bh * 0.30)),
             cv2.FONT_HERSHEY_SIMPLEX, 0.44 * (h / 1080.0), (190, 200, 210), 1, cv2.LINE_AA
         )
 
-        # 2. Calculated Speed in km/h (Main visual anchor)
-        val_color = (255, 255, 255) if is_measured else (180, 180, 245)
-        font_scale = 1.05 * (h / 1080.0) if is_measured else 0.72 * (h / 1080.0)
+        # 2. Calculated / Estimated Speed in km/h (Main visual anchor)
+        has_speed = "NOT MEASURED" not in speed_text
+        val_color = (255, 255, 255) if has_speed else (180, 180, 245)
+        font_scale = 1.05 * (h / 1080.0) if has_speed else 0.72 * (h / 1080.0)
         cv2.putText(
             out_frame, speed_text, (bx + 16, by + int(bh * 0.78)),
             cv2.FONT_HERSHEY_DUPLEX, max(0.5, font_scale), val_color, 2, cv2.LINE_AA
@@ -108,49 +118,68 @@ def generate_final_video(
     if not cap.isOpened():
         raise IOError(f"Could not open input video: {input_video_path}")
 
-    w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    in_fps = float(cap.get(cv2.CAP_PROP_FPS))
-    out_fps = in_fps if in_fps > 0 else fps
-
-    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-    writer = cv2.VideoWriter(output_video_path, fourcc, out_fps, (w, h))
-
-    renderer = FinalVideoRenderer(freeze_seconds=freeze_last_frame_seconds)
-
-    # Resolve measurement status (decoupled from specific types)
-    if isinstance(qc_result, bool):
-        is_measured = qc_result
-    elif isinstance(qc_result, dict):
-        is_measured = bool(qc_result.get("is_measured", False))
-    else:
-        is_measured = getattr(qc_result, "is_measured", False)
-
-    # Resolve speed value (decoupled from specific types)
-    speed_kmh = None
-    if release_speed is not None:
-        if isinstance(release_speed, (int, float)):
-            speed_kmh = float(release_speed)
-        elif isinstance(release_speed, dict):
-            speed_kmh = release_speed.get("speed_km_h")
-        else:
-            speed_kmh = getattr(release_speed, "speed_km_h", None)
-
-    if is_measured and speed_kmh is not None and speed_kmh > 0.0:
-        speed_str = f"{speed_kmh:.1f} km/h"
-    else:
-        speed_str = "SPEED: NOT MEASURED"
-
-    time_str = custom_timestamp_str or datetime.datetime.now().strftime("%Y-%m-%d  %H:%M:%S")
-
-    last_frame = None
+    writer = None
     try:
+        w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        in_fps = float(cap.get(cv2.CAP_PROP_FPS))
+        out_fps = in_fps if in_fps > 0 else fps
+
+        codecs = ["mp4v"] if sys.platform == "win32" else ["avc1", "mp4v"]
+        for codec in codecs:
+            try:
+                fourcc = cv2.VideoWriter_fourcc(*codec)
+                test_writer = cv2.VideoWriter(output_video_path, fourcc, out_fps, (w, h))
+                if test_writer.isOpened():
+                    writer = test_writer
+                    break
+            except Exception:
+                continue
+        if writer is None or not writer.isOpened():
+            fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+            writer = cv2.VideoWriter(output_video_path, fourcc, out_fps, (w, h))
+
+        renderer = FinalVideoRenderer(freeze_seconds=freeze_last_frame_seconds)
+
+        # Resolve measurement status (decoupled from specific types)
+        status_text = "MEASURED"
+        if isinstance(qc_result, bool):
+            is_measured = qc_result
+            status_text = "MEASURED" if is_measured else "NOT_MEASURED"
+        elif isinstance(qc_result, dict):
+            status_text = qc_result.get("status", "NOT_MEASURED")
+            is_measured = bool(qc_result.get("is_measured", False)) or (status_text == "MEASURED")
+        else:
+            status_text = getattr(qc_result, "status", "NOT_MEASURED")
+            is_measured = bool(getattr(qc_result, "is_measured", False)) or (status_text == "MEASURED")
+
+        # Resolve speed value (decoupled from specific types)
+        speed_kmh = None
+        if release_speed is not None:
+            if isinstance(release_speed, (int, float)):
+                speed_kmh = float(release_speed)
+            elif isinstance(release_speed, dict):
+                speed_kmh = release_speed.get("speed_km_h")
+            else:
+                speed_kmh = getattr(release_speed, "speed_km_h", None)
+
+        if speed_kmh is not None and speed_kmh > 0.0:
+            if is_measured and status_text == "MEASURED":
+                speed_str = f"{speed_kmh:.1f} km/h"
+            else:
+                speed_str = f"{speed_kmh:.1f} km/h (EST)"
+        else:
+            speed_str = "SPEED: NOT MEASURED"
+
+        time_str = custom_timestamp_str or datetime.datetime.now().strftime("%Y-%m-%d  %H:%M:%S")
+
+        last_frame = None
         while True:
             ret, frame = cap.read()
             if not ret or frame is None:
                 break
             rendered = renderer.render_badge(
-                frame, speed_str, time_str, is_measured=is_measured
+                frame, speed_str, time_str, is_measured=is_measured, status=status_text
             )
             writer.write(rendered)
             last_frame = rendered
@@ -162,6 +191,7 @@ def generate_final_video(
                 writer.write(last_frame)
     finally:
         cap.release()
-        writer.release()
+        if writer is not None:
+            writer.release()
 
     return output_video_path
