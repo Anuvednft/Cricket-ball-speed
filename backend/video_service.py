@@ -383,7 +383,8 @@ class VideoService:
                     headless=True,
                     radar_speed=radar_speed,
                     output_dir=output_dir,
-                    generate_videos=False,
+                    generate_videos=True,        # final video with speed badge
+                    generate_diagnostic=False,   # slow HUD video stays off for web
                     progress_callback=on_progress
                 )
 

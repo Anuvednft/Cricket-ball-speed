@@ -85,6 +85,7 @@
     qcScoreVal: document.getElementById('qcScoreVal'),
 
     // Download Links
+    dlFinalVideo: document.getElementById('dlFinalVideo'),
     dlJsonReport: document.getElementById('dlJsonReport'),
     dlExcelReport: document.getElementById('dlExcelReport'),
 
@@ -949,6 +950,9 @@
     }
 
     // 5. Configure Export Links
+    if (result.final_video) {
+      configureDownloadLink(el.dlFinalVideo, `/api/video/download/final/${taskId}`, 'delivery_with_speed.mp4');
+    }
     configureDownloadLink(el.dlJsonReport, `/api/video/download/json/${taskId}`, 'delivery_report.json');
     configureDownloadLink(el.dlExcelReport, `/api/video/download/excel/${taskId}`, 'delivery_summary.xlsx');
   }
@@ -972,6 +976,7 @@
     if (el.qcScoreVal) el.qcScoreVal.textContent = '-- / 100';
     if (el.liveVideoBadge) el.liveVideoBadge.style.display = 'none';
 
+    if (el.dlFinalVideo) el.dlFinalVideo.classList.add('disabled');
     if (el.dlJsonReport) el.dlJsonReport.classList.add('disabled');
     if (el.dlExcelReport) el.dlExcelReport.classList.add('disabled');
   }
