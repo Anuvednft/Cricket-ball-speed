@@ -898,9 +898,11 @@
       return;
     }
     const player = el.mainVideoPlayer;
-    let show = true;
+    let show = false;
     if (state.releaseTimeSec !== null && !isNaN(state.releaseTimeSec) && player) {
       show = player.ended || player.currentTime >= (state.releaseTimeSec + LIVE_BADGE_DELAY_SEC);
+    } else if (player) {
+      show = player.ended;   // release unknown: show the speed only when the video has ended
     }
     el.liveVideoBadge.style.display = show ? 'block' : 'none';
   }

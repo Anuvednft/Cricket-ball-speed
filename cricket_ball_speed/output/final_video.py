@@ -184,11 +184,12 @@ def generate_final_video(
         time_str = custom_timestamp_str or datetime.datetime.now().strftime("%Y-%m-%d  %H:%M:%S")
 
         # Speed appears `show_delay_after_release_sec` after the release frame.
-        # If no release frame is known, the badge is shown from the start.
+        # If no release frame is known, the badge is shown only on the closing freeze frame.
         if release_frame_index is not None and release_frame_index >= 0:
             badge_start_frame = int(release_frame_index) + int(round(out_fps * max(0.0, show_delay_after_release_sec)))
         else:
-            badge_start_frame = 0
+            # Release unknown: never show the speed before the ball is thrown; show it on the closing freeze only.
+            badge_start_frame = 10 ** 9
 
         last_frame = None
         last_plain_frame = None

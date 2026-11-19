@@ -146,7 +146,7 @@ class CricketSpeedPipeline:
             default_pitch_length_m=phys.get("wicket_distance_m", 20.12)
         )
 
-    def locate_delivery_window(self, loader: VideoLoader, bowler_det: BowlerDetector) -> Tuple[int, int]:
+    def locate_delivery_window(self, loader: VideoLoader, bowler_det: BowlerDetector) -> Tuple[int, int, Optional[int]]:
         """
         Fast temporal pre-scan using motion energy profiling with edge suppression to locate
         the active bowler delivery stride and ball flight window (~150-180 frames).
@@ -154,8 +154,7 @@ class CricketSpeedPipeline:
         """
         total = loader.metadata.total_frames
         fps = loader.metadata.fps
-        if total <= 250:
-            return 0, total
+        short_clip = total <= 250   # whole clip is the window, but the motion peak is still needed
 
         cap = cv2.VideoCapture(loader.video_path)
         step = 4
@@ -180,7 +179,7 @@ class CricketSpeedPipeline:
         cap.release()
 
         if not motion_profile:
-            return 0, total
+            return 0, total, None
 
         # Weight down extreme video edges (first 8% and last 12% where camera handling or walk-up occurs)
         weighted = []
@@ -195,12 +194,48 @@ class CricketSpeedPipeline:
         smoothed = np.convolve(weighted, np.ones(window_sz) / window_sz, mode="same")
         peak_idx = motion_profile[int(np.argmax(smoothed))][0]
 
+        if short_clip:
+            return 0, total, peak_idx
+
         w_before = int(round(fps * 0.35))
         w_after = int(round(fps * 0.75))
 
         start_frame = max(0, peak_idx - w_before)
         end_frame = min(total, peak_idx + w_after)
         return start_frame, end_frame, peak_idx
+
+    @staticmethod
+    def speed_overlay_anchor_frame(
+        release_event: Optional[Any],
+        peak_frame: Optional[int],
+        fps: float,
+        total_frames: int
+    ) -> Optional[int]:
+        """
+        Frame at which the ball leaves the bowler's hand; the speed overlay is timed from it.
+
+        1) A genuine release found by the release detector is used as is. The detector returns a
+           placeholder at frame 0 (observation_mode NOT_OBSERVED, is_valid False) when it cannot
+           see the release, and that placeholder must never be used as a real release.
+        2) Otherwise the release is estimated as the end of the delivery window: the strongest
+           motion (run-up / delivery stride) plus 0.75 s, the same window length the pipeline
+           already uses for the delivery.
+        3) If neither is available, returns None (the speed is then shown only at the end).
+        """
+        if (
+            release_event is not None
+            and getattr(release_event, "is_valid", False)
+            and getattr(release_event, "observation_mode", "NOT_OBSERVED") != "NOT_OBSERVED"
+            and getattr(release_event, "frame_index", None) is not None
+            and release_event.frame_index > 0
+        ):
+            return int(release_event.frame_index)
+
+        if peak_frame is not None and peak_frame > 0 and fps and fps > 0:
+            est = int(round(peak_frame + 0.75 * fps))
+            return max(0, min(est, int(total_frames) - 1))
+
+        return None
 
     def process_delivery(
         self,
@@ -660,6 +695,16 @@ class CricketSpeedPipeline:
         })
         excel_writer.save()
 
+        # Frame where the ball leaves the hand: the speed overlay is timed from here
+        speed_anchor_frame = self.speed_overlay_anchor_frame(
+            release_event, peak_frame, metadata.fps, metadata.total_frames
+        )
+        if speed_anchor_frame is not None:
+            self.logger.info(
+                f"Speed overlay anchored at frame {speed_anchor_frame} "
+                f"(t = {speed_anchor_frame / metadata.fps:.2f}s); it appears 1.0 s later."
+            )
+
         # Videos
         if generate_videos:
             if progress_callback:
@@ -671,7 +716,7 @@ class CricketSpeedPipeline:
                 qc_result=qc_result,
                 release_speed=release_speed,
                 fps=metadata.fps,
-                release_frame_index=release_event.frame_index if release_event else None,
+                release_frame_index=speed_anchor_frame,
                 show_delay_after_release_sec=1.0
             )
             if generate_diagnostic:
@@ -697,7 +742,7 @@ class CricketSpeedPipeline:
             "release_speed_kmh": release_speed.speed_km_h if release_speed else None,
             "c1_c2_speed_kmh": c1_c2_result.average_speed_km_h if c1_c2_result else None,
             "uncertainty_kmh": release_speed.uncertainty_km_h if release_speed else None,
-            "release_time_sec": release_event.timestamp_sec if release_event else None,
+            "release_time_sec": (speed_anchor_frame / metadata.fps) if speed_anchor_frame is not None else None,
             "qc_score": qc_result.quality_score,
             "rejection_reason": qc_result.rejection_reason,
             "json_report": json_out_path,
