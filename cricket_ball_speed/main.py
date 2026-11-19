@@ -213,6 +213,7 @@ class CricketSpeedPipeline:
         radar_speed: Optional[float] = None,
         output_dir: Optional[str] = None,
         generate_videos: bool = True,
+        generate_diagnostic: bool = True,
         progress_callback: Optional[Any] = None
     ) -> Dict[str, Any]:
         """Runs complete video processing, 3D tracking, and speed estimation."""
@@ -662,8 +663,8 @@ class CricketSpeedPipeline:
         # Videos
         if generate_videos:
             if progress_callback:
-                progress_callback(90.0, "Rendering broadcast final and diagnostic videos")
-            self.logger.info("Generating broadcast final and diagnostic videos...")
+                progress_callback(90.0, "Rendering final video with speed overlay")
+            self.logger.info("Generating broadcast final video (speed overlay)...")
             generate_final_video(
                 input_video_path=video_path,
                 output_video_path=final_vid_path,
@@ -671,19 +672,20 @@ class CricketSpeedPipeline:
                 release_speed=release_speed,
                 fps=metadata.fps
             )
-            generate_diagnostic_video(
-                input_video_path=video_path,
-                output_video_path=diag_vid_path,
-                camera_model=camera_model,
-                raw_observations=det_mgr.raw_ball_observations,
-                tracked_points=pred_mgr.get_all_points(),
-                release_event=release_event,
-                c1_c2_result=c1_c2_result,
-                trajectory_result=trajectory_result,
-                release_speed=release_speed,
-                qc_result=qc_result,
-                fps=metadata.fps
-            )
+            if generate_diagnostic:
+                generate_diagnostic_video(
+                    input_video_path=video_path,
+                    output_video_path=diag_vid_path,
+                    camera_model=camera_model,
+                    raw_observations=det_mgr.raw_ball_observations,
+                    tracked_points=pred_mgr.get_all_points(),
+                    release_event=release_event,
+                    c1_c2_result=c1_c2_result,
+                    trajectory_result=trajectory_result,
+                    release_speed=release_speed,
+                    qc_result=qc_result,
+                    fps=metadata.fps
+                )
 
         if progress_callback:
             progress_callback(100.0, "Analysis complete")
@@ -698,7 +700,7 @@ class CricketSpeedPipeline:
             "json_report": json_out_path,
             "excel_report": excel_out_path,
             "final_video": final_vid_path if generate_videos else None,
-            "diagnostic_video": diag_vid_path if generate_videos else None,
+            "diagnostic_video": diag_vid_path if (generate_videos and generate_diagnostic) else None,
         }
 
 
