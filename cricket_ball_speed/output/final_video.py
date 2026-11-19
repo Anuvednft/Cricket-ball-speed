@@ -55,46 +55,60 @@ class FinalVideoRenderer:
         status: str = "MEASURED"
     ) -> np.ndarray:
         """
-        Overlays the clean broadcast speed badge in the upper-left area.
-        Contains strictly speed, measurement status, and date/time.
+        Overlays a clean speed badge in the upper-left area showing ONLY:
+          - the date and time (small, top line)
+          - the speed (large, bottom line)
+        `is_measured` and `status` are accepted for compatibility but are never drawn.
+        The dark panel is sized from the text itself, so the text always fits inside it
+        for landscape, portrait (phone) and 4K videos alike.
         """
         h, w = frame.shape[:2]
-        bx, by, bw, bh = self.compute_badge_rect(w, h)
         out_frame = frame.copy()
 
-        # Premium semi-transparent dark glass card
+        # Scale from the longer side (1920 px = 1.0): identical to the old look for landscape
+        # video, and a sensible size for portrait (phone) video.
+        s = max(w, h) / 1920.0
+
+        has_speed = "NOT MEASURED" not in speed_text
+        date_font = cv2.FONT_HERSHEY_SIMPLEX
+        speed_font = cv2.FONT_HERSHEY_DUPLEX
+        date_scale = max(0.35, 0.44 * s)
+        speed_scale = max(0.55, (1.05 if has_speed else 0.72) * s)
+        date_thick = max(1, int(round(1.0 * s)))
+        speed_thick = max(2, int(round(2.0 * s)))
+        pad = max(10, int(round(16 * s)))
+        gap = max(8, int(round(14 * s)))
+        stripe_w = max(4, int(round(6 * s)))
+
+        (date_w, date_h), _ = cv2.getTextSize(timestamp_str, date_font, date_scale, date_thick)
+        (speed_w, speed_h), speed_base = cv2.getTextSize(speed_text, speed_font, speed_scale, speed_thick)
+
+        bw = stripe_w + pad + max(date_w, speed_w) + pad
+        bh = pad + date_h + gap + speed_h + speed_base + pad
+
+        # Position: upper-left (same safe margins as before), always fully inside the frame
+        bx, by, _, _ = self.compute_badge_rect(w, h)
+        bx = max(0, min(bx, w - bw))
+        by = max(0, min(by, h - bh))
+
+        # Dark semi-transparent panel with a green accent stripe on the left
         overlay = out_frame.copy()
         cv2.rectangle(overlay, (bx, by), (bx + bw, by + bh), (18, 22, 28), -1)
-
-        # Left accent stripe: vivid green for MEASURED, gold/amber for ESTIMATED, coral for NOT_MEASURED
-        if is_measured or status == "MEASURED":
-            stripe_color = (46, 204, 113) # Green
-        elif status == "ESTIMATED":
-            stripe_color = (0, 185, 245)  # Gold / Amber
-        else:
-            stripe_color = (70, 70, 230)  # Coral
-
-        cv2.rectangle(overlay, (bx, by), (bx + 6, by + bh), stripe_color, -1)
+        cv2.rectangle(overlay, (bx, by), (bx + stripe_w, by + bh), (46, 204, 113), -1)
         cv2.addWeighted(overlay, 0.85, out_frame, 0.15, 0, out_frame)
-
-        # Subtle card border
         cv2.rectangle(out_frame, (bx, by), (bx + bw, by + bh), (60, 68, 76), 1)
 
-        # 1. Date and Time + Status Pill (Upper row of badge)
-        status_tag = "" if (is_measured or status == "MEASURED") else f"  •  {status}"
-        header_text = f"{timestamp_str}{status_tag}"
+        text_x = bx + stripe_w + pad
+        # Date and time (small, grey)
         cv2.putText(
-            out_frame, header_text, (bx + 16, by + int(bh * 0.30)),
-            cv2.FONT_HERSHEY_SIMPLEX, 0.44 * (h / 1080.0), (190, 200, 210), 1, cv2.LINE_AA
+            out_frame, timestamp_str, (text_x, by + pad + date_h),
+            date_font, date_scale, (190, 200, 210), date_thick, cv2.LINE_AA
         )
-
-        # 2. Calculated / Estimated Speed in km/h (Main visual anchor)
-        has_speed = "NOT MEASURED" not in speed_text
+        # Speed (large, white)
         val_color = (255, 255, 255) if has_speed else (180, 180, 245)
-        font_scale = 1.05 * (h / 1080.0) if has_speed else 0.72 * (h / 1080.0)
         cv2.putText(
-            out_frame, speed_text, (bx + 16, by + int(bh * 0.78)),
-            cv2.FONT_HERSHEY_DUPLEX, max(0.5, font_scale), val_color, 2, cv2.LINE_AA
+            out_frame, speed_text, (text_x, by + pad + date_h + gap + speed_h),
+            speed_font, speed_scale, val_color, speed_thick, cv2.LINE_AA
         )
 
         return out_frame
@@ -174,12 +188,9 @@ def generate_final_video(
                 speed_kmh = getattr(release_speed, "speed_km_h", None)
 
         if speed_kmh is not None and speed_kmh > 0.0:
-            if is_measured and status_text == "MEASURED":
-                speed_str = f"{speed_kmh:.1f} km/h"
-            else:
-                speed_str = f"{speed_kmh:.1f} km/h (EST)"
+            speed_str = f"{speed_kmh:.1f} km/h"
         else:
-            speed_str = "SPEED: NOT MEASURED"
+            speed_str = "NOT MEASURED"
 
         time_str = custom_timestamp_str or datetime.datetime.now().strftime("%Y-%m-%d  %H:%M:%S")
 
