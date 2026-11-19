@@ -670,7 +670,9 @@ class CricketSpeedPipeline:
                 output_video_path=final_vid_path,
                 qc_result=qc_result,
                 release_speed=release_speed,
-                fps=metadata.fps
+                fps=metadata.fps,
+                release_frame_index=release_event.frame_index if release_event else None,
+                show_delay_after_release_sec=1.0
             )
             if generate_diagnostic:
                 generate_diagnostic_video(

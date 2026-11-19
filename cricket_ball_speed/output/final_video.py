@@ -107,7 +107,9 @@ def generate_final_video(
     release_speed: Optional[Union[Any, Dict[str, Any], float]] = None,
     fps: float = 60.0,
     freeze_last_frame_seconds: float = 1.5,
-    custom_timestamp_str: Optional[str] = None
+    custom_timestamp_str: Optional[str] = None,
+    release_frame_index: Optional[int] = None,
+    show_delay_after_release_sec: float = 1.0
 ) -> str:
     """
     Renders the broadcast final video showing ONLY bowling speed and date/time.
@@ -181,24 +183,44 @@ def generate_final_video(
 
         time_str = custom_timestamp_str or datetime.datetime.now().strftime("%Y-%m-%d  %H:%M:%S")
 
+        # Speed appears `show_delay_after_release_sec` after the release frame.
+        # If no release frame is known, the badge is shown from the start.
+        if release_frame_index is not None and release_frame_index >= 0:
+            badge_start_frame = int(release_frame_index) + int(round(out_fps * max(0.0, show_delay_after_release_sec)))
+        else:
+            badge_start_frame = 0
+
         last_frame = None
+        last_plain_frame = None
+        frame_idx = 0
         while True:
             ret, frame = cap.read()
             if not ret or frame is None:
                 break
             if frame.shape[1] != w or frame.shape[0] != h:
                 frame = cv2.resize(frame, (w, h), interpolation=cv2.INTER_AREA)
-            rendered = renderer.render_badge(
-                frame, speed_str, time_str, is_measured=is_measured, status=status_text
-            )
+            if frame_idx >= badge_start_frame:
+                rendered = renderer.render_badge(
+                    frame, speed_str, time_str, is_measured=is_measured, status=status_text
+                )
+            else:
+                rendered = frame
             writer.write(rendered)
             last_frame = rendered
+            last_plain_frame = frame
+            frame_idx += 1
 
         # Freeze last frame if configured
         if last_frame is not None and freeze_last_frame_seconds > 0:
+            freeze_src = last_frame
+            # If the video ended before the speed was due to appear, still show it on the freeze
+            if frame_idx <= badge_start_frame and last_plain_frame is not None:
+                freeze_src = renderer.render_badge(
+                    last_plain_frame, speed_str, time_str, is_measured=is_measured, status=status_text
+                )
             freeze_frames = int(round(out_fps * freeze_last_frame_seconds))
             for _ in range(freeze_frames):
-                writer.write(last_frame)
+                writer.write(freeze_src)
     finally:
         cap.release()
         if writer is not None:
