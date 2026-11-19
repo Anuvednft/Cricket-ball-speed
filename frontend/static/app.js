@@ -14,6 +14,8 @@
 
   // Application State
   const state = {
+    releaseTimeSec: null,        // when the ball was released (seconds into the video)
+    liveBadgeSpeedReady: false,  // true once a speed result is available
     currentVideoPath: null,
     currentVideoName: null,
     currentVideoMeta: null,
@@ -169,6 +171,9 @@
       });
       el.mainVideoPlayer.addEventListener('pause', () => {
         if (el.playerStateBadge) el.playerStateBadge.textContent = 'Paused';
+      });
+      ['timeupdate', 'seeked', 'seeking', 'ended', 'loadedmetadata'].forEach((evt) => {
+        el.mainVideoPlayer.addEventListener(evt, updateLiveBadgeVisibility);
       });
     }
 
@@ -884,6 +889,22 @@
   // --------------------------------------------------------------------------
   // Display Speed Results
   // --------------------------------------------------------------------------
+  // Speed box on the player appears 1 second after the ball release (or at the end of the video).
+  const LIVE_BADGE_DELAY_SEC = 1.0;
+  function updateLiveBadgeVisibility() {
+    if (!el.liveVideoBadge) return;
+    if (!state.liveBadgeSpeedReady) {
+      el.liveVideoBadge.style.display = 'none';
+      return;
+    }
+    const player = el.mainVideoPlayer;
+    let show = true;
+    if (state.releaseTimeSec !== null && !isNaN(state.releaseTimeSec) && player) {
+      show = player.ended || player.currentTime >= (state.releaseTimeSec + LIVE_BADGE_DELAY_SEC);
+    }
+    el.liveVideoBadge.style.display = show ? 'block' : 'none';
+  }
+
   function displaySpeedResults(result, taskId) {
     const isMeasured = result.status === 'MEASURED';
     const isEstimated = result.status === 'ESTIMATED';
@@ -923,8 +944,12 @@
         el.liveBadgeSpeedVal.textContent = speed.toFixed(1);
         el.liveBadgeStatus.textContent = isMeasured ? 'MEASURED' : 'ESTIMATED';
         el.liveBadgeStatus.style.color = isMeasured ? '#22c55e' : '#f59e0b';
-        el.liveVideoBadge.style.display = 'block';
+        state.liveBadgeSpeedReady = true;
+        state.releaseTimeSec = (result.release_time_sec !== null && result.release_time_sec !== undefined)
+          ? Number(result.release_time_sec) : null;
+        updateLiveBadgeVisibility();
       } else {
+        state.liveBadgeSpeedReady = false;
         el.liveVideoBadge.style.display = 'none';
       }
     }
@@ -974,6 +999,8 @@
     if (el.speedUncertaintyText) el.speedUncertaintyText.textContent = 'Evaluating ball kinematics...';
     if (el.c1c2SpeedVal) el.c1c2SpeedVal.textContent = '--.- km/h';
     if (el.qcScoreVal) el.qcScoreVal.textContent = '-- / 100';
+    state.liveBadgeSpeedReady = false;
+    state.releaseTimeSec = null;
     if (el.liveVideoBadge) el.liveVideoBadge.style.display = 'none';
 
     if (el.dlFinalVideo) el.dlFinalVideo.classList.add('disabled');

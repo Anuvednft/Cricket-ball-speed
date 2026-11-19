@@ -697,6 +697,7 @@ class CricketSpeedPipeline:
             "release_speed_kmh": release_speed.speed_km_h if release_speed else None,
             "c1_c2_speed_kmh": c1_c2_result.average_speed_km_h if c1_c2_result else None,
             "uncertainty_kmh": release_speed.uncertainty_km_h if release_speed else None,
+            "release_time_sec": release_event.timestamp_sec if release_event else None,
             "qc_score": qc_result.quality_score,
             "rejection_reason": qc_result.rejection_reason,
             "json_report": json_out_path,
